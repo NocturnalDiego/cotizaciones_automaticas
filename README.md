@@ -129,7 +129,7 @@ Las pruebas se ejecutan en SQLite en memoria según `phpunit.xml`.
 
 - Abre un issue o PR para cambios funcionales.
 - Añade pruebas para nueva funcionalidad y sigue las convenciones de codificación.
-- No uses emojis en UI, commits ni documentación; escribe todo el copy visible en español correcto.
+- No uses emojis en UI por favor; escribe todo en un buen español.
 
 ## Créditos y licencia
 
