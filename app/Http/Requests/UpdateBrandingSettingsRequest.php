@@ -23,7 +23,7 @@ class UpdateBrandingSettingsRequest extends FormRequest
             'issuer_rfc' => ['nullable', 'string', 'max:30'],
             'issuer_business_name' => ['nullable', 'string', 'max:255'],
             'quote_brand_name' => ['nullable', 'string', 'max:255'],
-            'brand_logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:4096'],
+            'brand_logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'remove_logo' => ['nullable', 'boolean'],
         ];
     }

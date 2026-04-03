@@ -8,6 +8,14 @@
 - App language quality rule: all user-facing text in the app must use correct Spanish (including accents and the letter ñ), with proper spelling and grammar.
 - English is allowed only in code-level identifiers and technical artifacts (variables, classes, methods, routes, config keys, commit tooling), not in visible UI copy.
 
+## Product Scope and Key Flows
+- Core goal: create, manage, and send professional quotes with multiple items.
+- Quote lifecycle: CRUD quotes, generate PDF outputs, and track advances/payments.
+- Channels: web UI (Blade) plus Telegram bot for guided capture; optional AI parsing via Ollama.
+- Admin/ops: user management with roles/permissions, and brand/issuer settings for consistent identity.
+- Reporting: dashboard KPIs and recent activity to support collections and follow-up.
+- For full usage and setup details, see [README.md].
+
 
 ## Build and Test
 - Use `composer run dev` for local development (server, queue listener, logs, and Vite).

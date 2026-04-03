@@ -76,10 +76,12 @@
                         <span>Total recibido</span>
                         <span>${{ number_format((float) $quote->paid_total, 2) }} + IVA</span>
                     </p>
-                    <p class="quote-total-line text-rose-700">
-                        <span>Saldo pendiente</span>
-                        <span>${{ number_format((float) $quote->balance_due, 2) }} + IVA</span>
-                    </p>
+                    @if ($quote->payments->isNotEmpty())
+                        <p class="quote-total-line text-rose-700">
+                            <span>Saldo pendiente</span>
+                            <span>${{ number_format((float) $quote->balance_due, 2) }} + IVA</span>
+                        </p>
+                    @endif
                 </div>
 
                 @if ($quote->payments->isNotEmpty())

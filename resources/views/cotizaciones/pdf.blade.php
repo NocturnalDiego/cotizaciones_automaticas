@@ -220,13 +220,15 @@
                 </table>
             @endforeach
 
-            <table class="line-row summary-row">
-                <tr>
-                    <td class="line-label" style="width:27%; font-weight:700;">Saldo pendiente</td>
-                    <td class="line-leader"></td>
-                    <td class="line-value">${{ number_format((float) $quote->balance_due, 2) }}+IVA</td>
-                </tr>
-            </table>
+            @if ($quote->payments->isNotEmpty())
+                <table class="line-row summary-row">
+                    <tr>
+                        <td class="line-label" style="width:27%; font-weight:700;">Saldo pendiente</td>
+                        <td class="line-leader"></td>
+                        <td class="line-value">${{ number_format((float) $quote->balance_due, 2) }}+IVA</td>
+                    </tr>
+                </table>
+            @endif
         </div>
 
         <p class="terms">{{ $quote->terms ?? '' }}</p>

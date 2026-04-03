@@ -53,7 +53,7 @@
                 id="brand_logo"
                 name="brand_logo"
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp"
                 class="sr-only"
                 @change="fileName = $event.target.files.length ? $event.target.files[0].name : ''"
             />
