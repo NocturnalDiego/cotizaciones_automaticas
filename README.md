@@ -10,6 +10,7 @@ Aplicación Laravel 12 para generar, gestionar y enviar cotizaciones profesional
 - [Instalación rápida](#instalación-rápida)
 - [Comandos útiles](#comandos-útiles)
 - [Desarrollo](#desarrollo)
+- [Galería visual del proyecto](#galería-visual-del-proyecto)
 - [Telegram (bot)](#telegram-bot)
 - [Variables de entorno principales](#variables-de-entorno-principales)
 - [Arquitectura y convenciones](#arquitectura-y-convenciones)
@@ -86,6 +87,39 @@ composer run dev
 - Seguir las convenciones de Blade y componentes; mantener controladores delgados y validaciones en Form Requests.
 - Escribir pruebas con Pest y colocarlas en `tests/Feature` o `tests/Unit`.
 - Mantener la UI en español impecable (acentos, ñ) y usar Tabler Icons para iconografía.
+
+## Galería visual del proyecto
+
+Para que la presentación del repositorio se vea profesional, agrega capturas reales en `docs/img/` y muéstralas por flujo.
+
+### Capturas sugeridas
+
+- `dashboard-general.png`
+- `listado-cotizaciones.png`
+- `crear-cotizacion.png`
+- `detalle-cotizacion.png`
+- `pdf-generado.png`
+- `bot-telegram.png`
+
+### Plantilla de galería (lista para pegar en el README)
+
+```md
+## Galería visual
+
+| Panel principal | Listado de cotizaciones |
+|---|---|
+| ![Panel principal](docs/img/dashboard-general.png) | ![Listado de cotizaciones](docs/img/listado-cotizaciones.png) |
+
+| Nueva cotización | Detalle de cotización |
+|---|---|
+| ![Nueva cotización](docs/img/crear-cotizacion.png) | ![Detalle de cotización](docs/img/detalle-cotizacion.png) |
+
+| PDF generado | Integración con Telegram |
+|---|---|
+| ![PDF generado](docs/img/pdf-generado.png) | ![Integración con Telegram](docs/img/bot-telegram.png) |
+```
+
+Guía de estilo recomendada para que las capturas se vean atractivas: [docs/presentacion-git.md](docs/presentacion-git.md).
 
 ## Telegram (bot)
 
