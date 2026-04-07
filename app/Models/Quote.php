@@ -83,4 +83,21 @@ class Quote extends Model
             'status' => $status,
         ]);
     }
+
+    public function pdfFileBaseName(): string
+    {
+        $clientName = trim((string) $this->client_name);
+        $referenceCode = trim((string) $this->reference_code);
+
+        $parts = array_values(array_filter([
+            $clientName,
+            $referenceCode,
+        ], fn (string $value): bool => $value !== ''));
+
+        if ($parts === []) {
+            return $this->folio;
+        }
+
+        return implode(' - ', $parts);
+    }
 }

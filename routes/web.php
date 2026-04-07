@@ -39,6 +39,9 @@ Route::middleware('auth')->group(function () {
     Route::put('/cotizaciones/{quote}', [QuoteController::class, 'update'])
         ->middleware('permission:'.AppPermissions::QUOTES_EDIT)
         ->name('cotizaciones.update');
+    Route::delete('/cotizaciones/{quote}', [QuoteController::class, 'destroy'])
+        ->middleware('permission:'.AppPermissions::QUOTES_DELETE)
+        ->name('cotizaciones.destroy');
     Route::post('/cotizaciones/{quote}/anticipos', [QuotePaymentController::class, 'store'])
         ->middleware('permission:'.AppPermissions::QUOTES_EDIT)
         ->name('cotizaciones.anticipos.store');

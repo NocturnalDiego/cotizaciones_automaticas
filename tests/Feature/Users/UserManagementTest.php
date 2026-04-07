@@ -106,3 +106,28 @@ test('administrador puede revocar autorizacion de telegram de un usuario', funct
     expect($managedUser->telegram_chat_id)->toBeNull();
     expect($managedUser->telegram_linked_at)->toBeNull();
 });
+
+test('gestor sin rol administrador no puede asignar permiso para eliminar cotizaciones', function () {
+    $manager = User::factory()->create();
+    grantUsersManagePermission($manager);
+
+    $response = actingAs($manager)
+        ->post(route('usuarios.store'), [
+            'name' => 'Usuario con limite',
+            'email' => 'usuario.limite@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'permissions' => [
+                AppPermissions::QUOTES_VIEW,
+                AppPermissions::QUOTES_DELETE,
+            ],
+        ]);
+
+    $response->assertRedirect(route('usuarios.index'));
+
+    $managedUser = User::query()->where('email', 'usuario.limite@example.com')->first();
+
+    expect($managedUser)->not->toBeNull();
+    expect($managedUser?->can(AppPermissions::QUOTES_VIEW))->toBeTrue();
+    expect($managedUser?->can(AppPermissions::QUOTES_DELETE))->toBeFalse();
+});

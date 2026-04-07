@@ -20,7 +20,7 @@ class TelegramClient
         $payload = [
             'offset' => $offset,
             'timeout' => max(1, min($timeout, 50)),
-            'allowed_updates' => ['message'],
+            'allowed_updates' => ['message', 'callback_query'],
         ];
 
         $response = $this->postJson('getUpdates', $payload);
@@ -90,6 +90,19 @@ class TelegramClient
         if (!is_array($json) || ($json['ok'] ?? false) !== true) {
             throw new RuntimeException('Telegram rechazo el envio del documento PDF.');
         }
+    }
+
+    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
+    {
+        $payload = [
+            'callback_query_id' => $callbackQueryId,
+        ];
+
+        if ($text !== null && trim($text) !== '') {
+            $payload['text'] = $text;
+        }
+
+        $this->postJson('answerCallbackQuery', $payload);
     }
 
     /**

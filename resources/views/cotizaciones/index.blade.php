@@ -46,7 +46,21 @@
                                     <td class="px-4 py-3 text-right">
                                         <div class="quote-table-actions">
                                             <a href="{{ route('cotizaciones.view', $quote) }}" class="quote-table-action-btn quote-table-action-btn-view">Ver</a>
-                                            <a href="{{ route('cotizaciones.edit', $quote) }}" class="quote-table-action-btn quote-table-action-btn-edit">Editar</a>
+                                            <a href="{{ route('cotizaciones.pdf', $quote) }}" class="quote-table-action-btn quote-table-action-btn-pdf">PDF</a>
+
+                                            @can(App\Support\AppPermissions::QUOTES_EDIT)
+                                                <a href="{{ route('cotizaciones.edit', $quote) }}" class="quote-table-action-btn quote-table-action-btn-edit">Editar</a>
+                                            @endcan
+
+                                            @can(App\Support\AppPermissions::QUOTES_DELETE)
+                                                <form method="POST" action="{{ route('cotizaciones.destroy', $quote) }}" class="quote-table-action-form" onsubmit="return confirm('¿Seguro que deseas eliminar esta cotización? Esta acción no se puede deshacer.');">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit" class="quote-table-action-btn quote-table-action-btn-delete">
+                                                        Eliminar
+                                                    </button>
+                                                </form>
+                                            @endcan
                                         </div>
                                     </td>
                                 </tr>

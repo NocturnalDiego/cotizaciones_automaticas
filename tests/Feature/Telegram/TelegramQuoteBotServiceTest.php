@@ -26,6 +26,11 @@ class FakeTelegramClientForBotTest extends TelegramClient
      */
     public array $documents = [];
 
+    /**
+     * @var array<int, string>
+     */
+    public array $answeredCallbacks = [];
+
     public function __construct()
     {
     }
@@ -58,6 +63,11 @@ class FakeTelegramClientForBotTest extends TelegramClient
             'file_path' => $filePath,
             'caption' => $caption,
         ];
+    }
+
+    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
+    {
+        $this->answeredCallbacks[] = $callbackQueryId;
     }
 }
 
@@ -157,7 +167,7 @@ test('telegram bot denies edit actions when linked user lacks permission', funct
     expect($telegramClient->messages[0])->toContain('no tiene permisos para ejecutar esta acción');
 });
 
-test('telegram bot shows main menu with keyboard buttons on start', function () {
+test('telegram bot shows main menu options as message on start', function () {
     [$service, $telegramClient] = botServiceFixture();
     authorizeChatForBotTest(100);
 
@@ -169,14 +179,36 @@ test('telegram bot shows main menu with keyboard buttons on start', function () 
     ]);
 
     expect($telegramClient->messages)->toHaveCount(1);
-    expect($telegramClient->messages[0])->toContain('Selecciona una opción en el teclado');
-    expect($telegramClient->messagePayloads[0]['reply_markup'])->not->toBeNull();
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.0.0.text'))->toBe('1 Crear cotización');
+    expect($telegramClient->messages[0])->toContain('Escribe una opción del menú');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.0.0.text'))->toBe('1 Crear cotización');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.0.1.text'))->toBe('2 Listar cotizaciones');
 });
 
-test('telegram bot rejects free text creation and keeps guided entry only', function () {
+test('telegram bot sends incomplete free text to guided flow with detected context', function () {
     [$service, $telegramClient] = botServiceFixture();
     authorizeChatForBotTest(110);
+
+    app()->instance(\App\Services\Ai\QuoteInstructionParser::class, new class {
+        public function parse(string $message): array
+        {
+            return [
+                'can_create' => false,
+                'reason' => 'Falta precio unitario para completar la cotización.',
+                'quote' => [
+                    'reference_code' => '4K110',
+                    'client_name' => 'Nutec',
+                    'client_rfc' => '',
+                    'location' => 'Tecámac',
+                    'issued_at' => now()->toDateString(),
+                    'terms' => '',
+                    'contact_name' => '',
+                    'contact_email' => '',
+                    'contact_phone' => '',
+                    'items' => [],
+                ],
+            ];
+        }
+    });
 
     $service->processUpdate([
         'message' => [
@@ -186,8 +218,63 @@ test('telegram bot rejects free text creation and keeps guided entry only', func
     ]);
 
     expect($telegramClient->messages)->toHaveCount(1);
-    expect($telegramClient->messages[0])->toContain('solo en modo guiado');
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.0.0.text'))->toBe('1 Crear cotización');
+    expect($telegramClient->messages[0])->toContain('Falta precio unitario para completar la cotización.');
+    expect($telegramClient->messages[0])->toContain('Creación guiada de cotización.');
+    expect($telegramClient->messages[0])->toContain('Paso 4 de 8: escribe la descripción del concepto.');
+    expect($telegramClient->messagePayloads[0]['reply_markup'])->toBeNull();
+});
+
+test('telegram bot can create quote from free text when parser returns complete data', function () {
+    Quote::create([
+        'folio' => 'COT-000111',
+        'reference_code' => 'BASE-LIBRE',
+        'client_name' => 'Base Libre',
+        'issued_at' => now()->toDateString(),
+        'vat_rate' => 0,
+        'total' => 1000,
+    ]);
+
+    [$service, $telegramClient] = botServiceFixture();
+    authorizeChatForBotTest(111);
+
+    app()->instance(\App\Services\Ai\QuoteInstructionParser::class, new class {
+        public function parse(string $message): array
+        {
+            return [
+                'can_create' => true,
+                'reason' => '',
+                'quote' => [
+                    'reference_code' => 'PROY-111',
+                    'client_name' => 'Cliente Libre',
+                    'client_rfc' => '',
+                    'location' => 'CDMX',
+                    'issued_at' => now()->toDateString(),
+                    'terms' => '',
+                    'contact_name' => '',
+                    'contact_email' => '',
+                    'contact_phone' => '',
+                    'items' => [
+                        [
+                            'description' => 'Instalación',
+                            'quantity' => 1,
+                            'unit_price' => 1500,
+                        ],
+                    ],
+                ],
+            ];
+        }
+    });
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 111],
+            'text' => 'Cotiza algo para cliente libre',
+        ],
+    ]);
+
+    expect($telegramClient->messages)->toHaveCount(1);
+    expect($telegramClient->messages[0])->toContain('Cotización creada correctamente.');
+    expect($telegramClient->documents)->toHaveCount(1);
 });
 
 test('telegram bot can list quotes with cliente, proyecto y total', function () {
@@ -215,8 +302,9 @@ test('telegram bot can list quotes with cliente, proyecto y total', function () 
     expect($telegramClient->messages[0])->toContain('Cliente: Nutec');
     expect($telegramClient->messages[0])->toContain('Proyecto: 4K097');
     expect($telegramClient->messages[0])->toContain('$122,480.00 + IVA');
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.0.0.text'))->toBe('9 Buscar');
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.1.0.text'))->toBe('3 Reenviar PDF');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.0.0.text'))->toBe('9 Buscar');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.1.0.text'))->toBe('3 Reenviar PDF');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.1.1.text'))->toBe('4 Agregar anticipo');
 });
 
 test('telegram bot can guide anticipo flow and update quote totals', function () {
@@ -269,8 +357,8 @@ test('telegram bot can guide anticipo flow and update quote totals', function ()
     expect($quote->payments()->count())->toBe(1);
     expect(collect($telegramClient->messages)->last())->toContain('Anticipo registrado correctamente');
     expect($telegramClient->documents)->toHaveCount(1);
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.0.0.text'))->toBe('1');
-    expect((string) data_get($telegramClient->messagePayloads[1], 'reply_markup.keyboard.0.0.text'))->toBe('9 Ver formato');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.0.0.text'))->toBe('1');
+    expect((string) data_get($telegramClient->messagePayloads[1], 'reply_markup.inline_keyboard.0.0.text'))->toBe('9 Ver formato');
 });
 
 test('telegram bot can select quote number 6 in anticipo flow without triggering help', function () {
@@ -359,8 +447,8 @@ test('telegram bot can guide quote edit flow for client name', function () {
 
     expect($quote->client_name)->toBe('Cliente Editado SA de CV');
     expect(collect($telegramClient->messages)->last())->toContain('Campo actualizado: Cliente');
-    expect((string) data_get($telegramClient->messagePayloads[1], 'reply_markup.keyboard.0.0.text'))->toBe('1 Cliente');
-    expect((string) data_get($telegramClient->messagePayloads[2], 'reply_markup.keyboard.0.0.text'))->toBe('vacio');
+    expect((string) data_get($telegramClient->messagePayloads[1], 'reply_markup.inline_keyboard.0.0.text'))->toBe('1 Cliente');
+    expect((string) data_get($telegramClient->messagePayloads[2], 'reply_markup.inline_keyboard.0.0.text'))->toBe('vacio');
 });
 
 test('telegram bot can guide resend pdf flow from listed quotes', function () {
@@ -392,10 +480,10 @@ test('telegram bot can guide resend pdf flow from listed quotes', function () {
 
     expect($telegramClient->messages)->toHaveCount(2);
     expect($telegramClient->messages[0])->toContain('Selecciona la cotización de la cual deseas reenviar el PDF');
-    expect($telegramClient->messages[1])->toContain('Te envío el PDF de COT-000004');
+    expect($telegramClient->messages[1])->toContain('Te envío el PDF de Cliente PDF - 4K100');
     expect($telegramClient->documents)->toHaveCount(1);
-    expect($telegramClient->documents[0]['caption'])->toBe('PDF de COT-000004');
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.0.0.text'))->toBe('1');
+    expect($telegramClient->documents[0]['caption'])->toBe('PDF de Cliente PDF - 4K100');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.0.0.text'))->toBe('1');
 });
 
 test('telegram bot can create quote in guided mode', function () {
@@ -457,7 +545,7 @@ test('telegram bot paginates quote selection for send pdf flow', function () {
     ]);
 
     expect($telegramClient->messages[0])->toContain('página 1 de 2');
-    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.keyboard.2.0.text'))->toBe('8 Siguiente');
+    expect((string) data_get($telegramClient->messagePayloads[0], 'reply_markup.inline_keyboard.2.0.text'))->toBe('8 Siguiente');
 
     $service->processUpdate([
         'message' => [
@@ -467,6 +555,31 @@ test('telegram bot paginates quote selection for send pdf flow', function () {
     ]);
 
     expect($telegramClient->messages[1])->toContain('página 2 de 2');
+});
+
+test('telegram bot processes inline callback data as command', function () {
+    [$service, $telegramClient] = botServiceFixture();
+    authorizeChatForBotTest(140);
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 140],
+            'text' => '/start',
+        ],
+    ]);
+
+    $service->processUpdate([
+        'callback_query' => [
+            'id' => 'cbq_140_menu_2',
+            'data' => '2 Listar cotizaciones',
+            'message' => [
+                'chat' => ['id' => 140],
+            ],
+        ],
+    ]);
+
+    expect($telegramClient->answeredCallbacks)->toContain('cbq_140_menu_2');
+    expect($telegramClient->messages[1])->toContain('No hay cotizaciones registradas todavía.');
 });
 
 test('telegram bot can resend pdf directly when folio is in same message', function () {
@@ -490,9 +603,9 @@ test('telegram bot can resend pdf directly when folio is in same message', funct
     ]);
 
     expect($telegramClient->messages)->toHaveCount(1);
-    expect($telegramClient->messages[0])->toContain('Te envío el PDF de COT-000005');
+    expect($telegramClient->messages[0])->toContain('Te envío el PDF de Cliente Directo PDF - 4K101');
     expect($telegramClient->documents)->toHaveCount(1);
-    expect($telegramClient->documents[0]['caption'])->toBe('PDF de COT-000005');
+    expect($telegramClient->documents[0]['caption'])->toBe('PDF de Cliente Directo PDF - 4K101');
 });
 
 test('telegram bot can parse natural amount like 50 mil in anticipo flow', function () {

@@ -251,3 +251,63 @@ test('authenticated user can download quote pdf', function () {
     $response->assertOk();
     expect((string) $response->headers->get('content-type'))->toContain('application/pdf');
 });
+
+test('quotes index shows direct pdf action in actions menu', function () {
+    $user = User::factory()->create();
+    grantQuotePermissions($user, [AppPermissions::QUOTES_VIEW]);
+
+    $quote = Quote::create([
+        'folio' => 'COT-000201',
+        'reference_code' => '4K101',
+        'client_name' => 'Volvo',
+        'issued_at' => now()->toDateString(),
+        'vat_rate' => 0,
+        'terms' => 'Condiciones de prueba',
+    ]);
+
+    $response = actingAs($user)
+        ->get(route('cotizaciones.index'));
+
+    $response->assertOk();
+    $response->assertSee(route('cotizaciones.pdf', $quote), false);
+});
+
+test('user with delete permission can delete quote', function () {
+    $user = User::factory()->create();
+    grantQuotePermissions($user, [AppPermissions::QUOTES_VIEW, AppPermissions::QUOTES_DELETE]);
+
+    $quote = Quote::create([
+        'folio' => 'COT-000202',
+        'reference_code' => '4K102',
+        'client_name' => 'MAN',
+        'issued_at' => now()->toDateString(),
+        'vat_rate' => 0,
+        'terms' => 'Condiciones de prueba',
+    ]);
+
+    $response = actingAs($user)
+        ->delete(route('cotizaciones.destroy', $quote));
+
+    $response->assertRedirect(route('cotizaciones.index'));
+    expect(Quote::query()->whereKey($quote->id)->exists())->toBeFalse();
+});
+
+test('user without delete permission cannot delete quote', function () {
+    $user = User::factory()->create();
+    grantQuotePermissions($user, [AppPermissions::QUOTES_VIEW]);
+
+    $quote = Quote::create([
+        'folio' => 'COT-000203',
+        'reference_code' => '4K103',
+        'client_name' => 'Iveco',
+        'issued_at' => now()->toDateString(),
+        'vat_rate' => 0,
+        'terms' => 'Condiciones de prueba',
+    ]);
+
+    $response = actingAs($user)
+        ->delete(route('cotizaciones.destroy', $quote));
+
+    $response->assertForbidden();
+    expect(Quote::query()->whereKey($quote->id)->exists())->toBeTrue();
+});

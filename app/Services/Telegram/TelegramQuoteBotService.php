@@ -49,6 +49,26 @@ class TelegramQuoteBotService
      */
     public function processUpdate(array $update): void
     {
+        $callbackQuery = data_get($update, 'callback_query');
+
+        if (is_array($callbackQuery)) {
+            $callbackId = trim((string) data_get($callbackQuery, 'id', ''));
+            $chatId = data_get($callbackQuery, 'message.chat.id');
+            $data = trim((string) data_get($callbackQuery, 'data', ''));
+
+            if ($callbackId !== '') {
+                $this->telegramClient->answerCallbackQuery($callbackId);
+            }
+
+            if ($chatId === null || $data === '') {
+                return;
+            }
+
+            $this->handleIncomingText((string) $chatId, $data);
+
+            return;
+        }
+
         $message = data_get($update, 'message');
 
         if (!is_array($message)) {
@@ -114,45 +134,7 @@ class TelegramQuoteBotService
             return;
         }
 
-        // Priorizar opciones del menú (teclado) sobre la detección por lenguaje natural.
-        if ($this->handleMainMenuOption($chatIdString, $text, $linkedUser)) {
-            return;
-        }
-
-        // Permitir creación por lenguaje natural (IA) si parece una solicitud de cotización
-        if ($this->looksLikeQuoteCreation($text)) {
-            if (!$this->ensurePermission($chatIdString, $linkedUser, AppPermissions::QUOTES_CREATE)) {
-                return;
-            }
-            try {
-                $draft = app(\App\Services\Ai\QuoteInstructionParser::class)->parse($text);
-                if ($draft['can_create'] ?? false) {
-                    $quote = $this->quoteAutomationService->createFromStructuredData($draft['quote']);
-                    $this->telegramClient->sendMessageWithMarkup(
-                        $chatIdString,
-                        "Cotización creada correctamente.\n".$this->buildQuoteSummary($quote, true),
-                        $this->buildMainMenuKeyboard()
-                    );
-                    $this->sendQuotePdf($chatIdString, $quote, 'PDF de '.$quote->folio);
-                    return;
-                } else {
-                    $this->telegramClient->sendMessageWithMarkup(
-                        $chatIdString,
-                        $draft['reason'] ?? 'No se pudo interpretar la solicitud. Usa el menú guiado.',
-                        $this->buildMainMenuKeyboard()
-                    );
-                    return;
-                }
-            } catch (\Throwable $e) {
-                $this->telegramClient->sendMessageWithMarkup(
-                    $chatIdString,
-                    'No fue posible crear la cotización automáticamente. Usa el menú guiado.',
-                    $this->buildMainMenuKeyboard()
-                );
-                return;
-            }
-        }
-
+        // Priorizar opciones del menú por texto sobre la detección por lenguaje natural.
         if ($this->handleMainMenuOption($chatIdString, $text, $linkedUser)) {
             return;
         }
@@ -205,9 +187,49 @@ class TelegramQuoteBotService
             return;
         }
 
-        $this->telegramClient->sendMessageWithMarkup(
+        if ($this->looksLikeQuoteCreation($text)) {
+            if (!$this->ensurePermission($chatIdString, $linkedUser, AppPermissions::QUOTES_CREATE)) {
+                return;
+            }
+
+            $draft = app(\App\Services\Ai\QuoteInstructionParser::class)->parse($text);
+            $quoteData = is_array($draft['quote'] ?? null) ? $draft['quote'] : [];
+
+            if (($draft['can_create'] ?? false) === true) {
+                try {
+                    $quote = $this->quoteAutomationService->createFromStructuredData($quoteData);
+                    $this->sendMessage(
+                        $chatIdString,
+                        "Cotización creada correctamente.\n".$this->buildQuoteSummary($quote, true),
+                        $this->buildMainMenuKeyboard()
+                    );
+                    $this->sendQuotePdf($chatIdString, $quote, 'PDF de '.$this->pdfDisplayName($quote));
+
+                    return;
+                } catch (Throwable) {
+                    // Si falla el guardado automático, migrar a guiado con el contexto detectado.
+                }
+            }
+
+            $seedDraft = $this->buildGuidedSeedDraft($quoteData);
+            $reason = trim((string) ($draft['reason'] ?? ''));
+
+            if ($reason === '') {
+                $reason = 'Puedo ayudarte mejor si completamos algunos datos en modo guiado.';
+            }
+
+            $this->startGuidedCreateFlow(
+                $chatIdString,
+                $seedDraft,
+                $reason
+            );
+
+            return;
+        }
+
+        $this->sendMessage(
             $chatIdString,
-            'Usa el teclado para elegir una opción.',
+            'Escribe una opción del menú para continuar.',
             $this->buildMainMenuKeyboard()
         );
     }
@@ -259,32 +281,95 @@ class TelegramQuoteBotService
         };
     }
 
-    private function startGuidedCreateFlow(string $chatId): void
+    /**
+     * @param  array<string, mixed>|null  $seedDraft
+     */
+    private function startGuidedCreateFlow(string $chatId, ?array $seedDraft = null, ?string $contextMessage = null): void
     {
+        $draft = [
+            'reference_code' => '',
+            'client_name' => '',
+            'client_rfc' => '',
+            'location' => '',
+            'issued_at' => now()->toDateString(),
+            'terms' => '',
+            'contact_name' => '',
+            'contact_email' => '',
+            'contact_phone' => '',
+            'items' => [],
+        ];
+
+        if (is_array($seedDraft)) {
+            $draft = array_merge($draft, [
+                'reference_code' => trim((string) ($seedDraft['reference_code'] ?? '')),
+                'client_name' => trim((string) ($seedDraft['client_name'] ?? '')),
+                'client_rfc' => trim((string) ($seedDraft['client_rfc'] ?? '')),
+                'location' => trim((string) ($seedDraft['location'] ?? '')),
+                'issued_at' => trim((string) ($seedDraft['issued_at'] ?? '')) ?: now()->toDateString(),
+                'terms' => trim((string) ($seedDraft['terms'] ?? '')),
+                'contact_name' => trim((string) ($seedDraft['contact_name'] ?? '')),
+                'contact_email' => trim((string) ($seedDraft['contact_email'] ?? '')),
+                'contact_phone' => trim((string) ($seedDraft['contact_phone'] ?? '')),
+            ]);
+        }
+
+        $startStep = $draft['client_name'] === '' ? 'client_name' : 'item_description';
+
         $this->setState($chatId, [
             'action' => self::ACTION_CREATE_GUIDED,
-            'step' => 'client_name',
-            'draft' => [
-                'reference_code' => '',
-                'client_name' => '',
-                'client_rfc' => '',
-                'location' => '',
-                'issued_at' => now()->toDateString(),
-                'terms' => '',
-                'contact_name' => '',
-                'contact_email' => '',
-                'contact_phone' => '',
-                'items' => [],
-            ],
+            'step' => $startStep,
+            'draft' => $draft,
             'current_item' => [],
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $lines = [];
+
+        if ($contextMessage !== null && trim($contextMessage) !== '') {
+            $lines[] = trim($contextMessage);
+            $lines[] = '';
+        }
+
+        $lines[] = 'Creación guiada de cotización.';
+
+        if ($startStep === 'client_name') {
+            $lines[] = 'Paso 1 de 8: escribe el nombre del cliente.';
+
+            $this->sendMessage(
+                $chatId,
+                implode("\n", $lines),
+                $this->buildGuidedCancelKeyboard()
+            );
+
+            return;
+        }
+
+        $lines[] = 'Detecté datos iniciales. Continuemos con el concepto principal.';
+        $lines[] = 'Paso 4 de 8: escribe la descripción del concepto.';
+
+        $this->sendMessage(
             $chatId,
-            "Creación guiada de cotización.\n".
-            "Paso 1 de 8: escribe el nombre del cliente.",
+            implode("\n", $lines),
             $this->buildGuidedCancelKeyboard()
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $quoteData
+     * @return array<string, mixed>
+     */
+    private function buildGuidedSeedDraft(array $quoteData): array
+    {
+        return [
+            'reference_code' => trim((string) ($quoteData['reference_code'] ?? '')),
+            'client_name' => trim((string) ($quoteData['client_name'] ?? '')),
+            'client_rfc' => trim((string) ($quoteData['client_rfc'] ?? '')),
+            'location' => trim((string) ($quoteData['location'] ?? '')),
+            'issued_at' => trim((string) ($quoteData['issued_at'] ?? '')),
+            'terms' => trim((string) ($quoteData['terms'] ?? '')),
+            'contact_name' => trim((string) ($quoteData['contact_name'] ?? '')),
+            'contact_email' => trim((string) ($quoteData['contact_email'] ?? '')),
+            'contact_phone' => trim((string) ($quoteData['contact_phone'] ?? '')),
+        ];
     }
 
     private function startQuoteListBrowse(string $chatId, int $page = 1, ?string $search = null): void
@@ -297,7 +382,7 @@ class TelegramQuoteBotService
             'search' => $search,
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             $list['text']."\n\n".
             "Para reenviar PDF, agregar anticipo o editar, usa el menú de acciones.",
@@ -321,7 +406,7 @@ class TelegramQuoteBotService
             'page' => $selection['page'],
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Selecciona la cotización a la que deseas registrar anticipo.\n".
             "Puedes responder con número, folio, id o número de proyecto.\n\n".
@@ -346,7 +431,7 @@ class TelegramQuoteBotService
             'page' => $selection['page'],
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Selecciona la cotización que deseas editar.\n".
             "Puedes responder con número, folio, id o número de proyecto.\n\n".
@@ -371,7 +456,7 @@ class TelegramQuoteBotService
             'page' => $selection['page'],
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Selecciona la cotización de la cual deseas reenviar el PDF.\n".
             "Puedes responder con número, folio, id o número de proyecto.\n\n".
@@ -469,14 +554,14 @@ class TelegramQuoteBotService
 
         if ($step === 'client_name') {
             if ($trimmed === '') {
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'El cliente es obligatorio. Escribe el nombre del cliente.', $this->buildGuidedCancelKeyboard());
+                $this->sendMessage($chatId, 'El cliente es obligatorio. Escribe el nombre del cliente.', $this->buildGuidedCancelKeyboard());
 
                 return true;
             }
 
             $draft['client_name'] = $trimmed;
             $this->setGuidedState($chatId, 'reference_code', $draft, $currentItem);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 2 de 8: escribe el número de proyecto o pedido. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Paso 2 de 8: escribe el número de proyecto o pedido. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -484,7 +569,7 @@ class TelegramQuoteBotService
         if ($step === 'reference_code') {
             $draft['reference_code'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'location', $draft, $currentItem);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 3 de 8: escribe la ubicación del proyecto. Puedes omitirla.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Paso 3 de 8: escribe la ubicación del proyecto. Puedes omitirla.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -492,21 +577,21 @@ class TelegramQuoteBotService
         if ($step === 'location') {
             $draft['location'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'item_description', $draft, []);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 4 de 8: escribe la descripción del concepto.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 4 de 8: escribe la descripción del concepto.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
 
         if ($step === 'item_description') {
             if ($trimmed === '') {
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'La descripción es obligatoria. Captúrala para continuar.', $this->buildGuidedCancelKeyboard());
+                $this->sendMessage($chatId, 'La descripción es obligatoria. Captúrala para continuar.', $this->buildGuidedCancelKeyboard());
 
                 return true;
             }
 
             $currentItem['description'] = $trimmed;
             $this->setGuidedState($chatId, 'item_quantity', $draft, $currentItem);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 5 de 8: escribe la cantidad del concepto.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 5 de 8: escribe la cantidad del concepto.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
@@ -515,14 +600,14 @@ class TelegramQuoteBotService
             $quantity = $this->parseDecimal($trimmed);
 
             if ($quantity <= 0) {
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'Cantidad inválida. Escribe un número mayor a cero.', $this->buildGuidedCancelKeyboard());
+                $this->sendMessage($chatId, 'Cantidad inválida. Escribe un número mayor a cero.', $this->buildGuidedCancelKeyboard());
 
                 return true;
             }
 
             $currentItem['quantity'] = round($quantity, 2);
             $this->setGuidedState($chatId, 'item_unit_price', $draft, $currentItem);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 6 de 8: escribe el precio unitario.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 6 de 8: escribe el precio unitario.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
@@ -531,7 +616,7 @@ class TelegramQuoteBotService
             $unitPrice = $this->parseAmountCandidate($trimmed);
 
             if ($unitPrice === null || $unitPrice <= 0) {
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'Precio unitario inválido. Escribe un monto mayor a cero.', $this->buildGuidedCancelKeyboard());
+                $this->sendMessage($chatId, 'Precio unitario inválido. Escribe un monto mayor a cero.', $this->buildGuidedCancelKeyboard());
 
                 return true;
             }
@@ -544,7 +629,7 @@ class TelegramQuoteBotService
             ];
 
             $this->setGuidedState($chatId, 'add_more_items', $draft, []);
-            $this->telegramClient->sendMessageWithMarkup($chatId, '¿Deseas agregar otro concepto?', $this->buildGuidedAddMoreKeyboard());
+            $this->sendMessage($chatId, '¿Deseas agregar otro concepto?', $this->buildGuidedAddMoreKeyboard());
 
             return true;
         }
@@ -552,19 +637,19 @@ class TelegramQuoteBotService
         if ($step === 'add_more_items') {
             if ($this->isAffirmativeCommand($trimmed)) {
                 $this->setGuidedState($chatId, 'item_description', $draft, []);
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'Captura la descripción del nuevo concepto.', $this->buildGuidedCancelKeyboard());
+                $this->sendMessage($chatId, 'Captura la descripción del nuevo concepto.', $this->buildGuidedCancelKeyboard());
 
                 return true;
             }
 
             if ($this->isNegativeCommand($trimmed)) {
                 $this->setGuidedState($chatId, 'contact_name', $draft, []);
-                $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 7 de 8: escribe el nombre de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+                $this->sendMessage($chatId, 'Paso 7 de 8: escribe el nombre de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
 
                 return true;
             }
 
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Responde con sí o no para continuar.', $this->buildGuidedAddMoreKeyboard());
+            $this->sendMessage($chatId, 'Responde con sí o no para continuar.', $this->buildGuidedAddMoreKeyboard());
 
             return true;
         }
@@ -572,7 +657,7 @@ class TelegramQuoteBotService
         if ($step === 'contact_name') {
             $draft['contact_name'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'contact_email', $draft, []);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Paso 8 de 8: escribe el correo de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Paso 8 de 8: escribe el correo de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -582,7 +667,7 @@ class TelegramQuoteBotService
                 $draft['contact_email'] = '';
             } else {
                 if (filter_var($trimmed, FILTER_VALIDATE_EMAIL) === false) {
-                    $this->telegramClient->sendMessageWithMarkup($chatId, 'Correo inválido. Captura un correo válido o escribe omitir.', $this->buildGuidedOptionalKeyboard());
+                    $this->sendMessage($chatId, 'Correo inválido. Captura un correo válido o escribe omitir.', $this->buildGuidedOptionalKeyboard());
 
                     return true;
                 }
@@ -591,7 +676,7 @@ class TelegramQuoteBotService
             }
 
             $this->setGuidedState($chatId, 'contact_phone', $draft, []);
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Escribe el teléfono de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Escribe el teléfono de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -600,7 +685,7 @@ class TelegramQuoteBotService
             $draft['contact_phone'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'confirm', $draft, []);
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "Resumen preliminar:\n".
                 "Cliente: ".($draft['client_name'] ?: 'Sin dato')."\n".
@@ -619,7 +704,7 @@ class TelegramQuoteBotService
                 try {
                     $quote = $this->quoteAutomationService->createFromStructuredData($draft);
                 } catch (Throwable $exception) {
-                    $this->telegramClient->sendMessageWithMarkup(
+                    $this->sendMessage(
                         $chatId,
                         'No fue posible guardar la cotización con los datos capturados. Revisa la información o inicia de nuevo.',
                         $this->buildGuidedConfirmKeyboard()
@@ -629,12 +714,12 @@ class TelegramQuoteBotService
                 }
 
                 $this->clearState($chatId);
-                $this->telegramClient->sendMessageWithMarkup(
+                $this->sendMessage(
                     $chatId,
                     "Cotización creada correctamente.\n".$this->buildQuoteSummary($quote, true),
                     $this->buildMainMenuKeyboard()
                 );
-                $this->sendQuotePdf($chatId, $quote, 'PDF de '.$quote->folio);
+                $this->sendQuotePdf($chatId, $quote, 'PDF de '.$this->pdfDisplayName($quote));
 
                 return true;
             }
@@ -646,7 +731,7 @@ class TelegramQuoteBotService
                 return true;
             }
 
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Responde confirmar o cancelar para continuar.', $this->buildGuidedConfirmKeyboard());
+            $this->sendMessage($chatId, 'Responde confirmar o cancelar para continuar.', $this->buildGuidedConfirmKeyboard());
 
             return true;
         }
@@ -681,7 +766,7 @@ class TelegramQuoteBotService
                 'search' => $search,
             ]);
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'Escribe el término a buscar (folio, cliente o proyecto).',
                 $this->buildListSearchKeyboard()
@@ -710,7 +795,7 @@ class TelegramQuoteBotService
         $search = trim($text);
 
         if ($search === '') {
-            $this->telegramClient->sendMessageWithMarkup($chatId, 'Captura un término de búsqueda válido.', $this->buildListSearchKeyboard());
+            $this->sendMessage($chatId, 'Captura un término de búsqueda válido.', $this->buildListSearchKeyboard());
 
             return true;
         }
@@ -750,7 +835,7 @@ class TelegramQuoteBotService
             'page' => $selection['page'],
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             $title."\n".
             "Puedes responder con número, folio, id o número de proyecto.\n\n".
@@ -781,7 +866,7 @@ class TelegramQuoteBotService
         if ($quote === null) {
             $selection = $this->buildQuoteSelectionData((int) ($state['page'] ?? 1));
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "No encontré esa cotización. Intenta de nuevo con número, folio, id o número de proyecto.\n\n".
                 $selection['text'],
@@ -796,7 +881,7 @@ class TelegramQuoteBotService
             'quote_id' => $quote->id,
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Seleccionaste {$quote->folio}.\n".
             $this->buildQuoteSummary($quote, false)."\n\n".
@@ -820,7 +905,7 @@ class TelegramQuoteBotService
 
         if ($quote === null) {
             $this->clearState($chatId);
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'La cotización seleccionada ya no existe. Inicia de nuevo la operación.',
                 $this->buildMainMenuKeyboard()
@@ -832,7 +917,7 @@ class TelegramQuoteBotService
         $parsedPayment = $this->parsePaymentInput($text);
 
         if ($this->isShowPaymentFormatCommand($text)) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "Formato recomendado:\n".
                 "monto 15000, concepto Primer anticipo, fecha 2026-03-28, notas Transferencia\n\n".
@@ -844,7 +929,7 @@ class TelegramQuoteBotService
         }
 
         if ($parsedPayment === null) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "No pude leer el anticipo.\n".
                 "Usa este formato:\n".
@@ -865,14 +950,14 @@ class TelegramQuoteBotService
 
         $this->clearState($chatId);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Anticipo registrado correctamente en {$quote->folio}.\n".
             $this->buildQuoteSummary($quote, true),
             $this->buildMainMenuKeyboard()
         );
 
-        $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$quote->folio);
+        $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$this->pdfDisplayName($quote));
 
         return true;
     }
@@ -895,13 +980,13 @@ class TelegramQuoteBotService
         $quote->load(['payments' => fn ($query) => $query->orderBy('received_at')->orderBy('id')]);
 
         $this->clearState($chatId);
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Anticipo registrado en {$quote->folio}.\n".
             $this->buildQuoteSummary($quote, true),
             $this->buildMainMenuKeyboard()
         );
-        $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$quote->folio);
+        $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$this->pdfDisplayName($quote));
 
         return true;
     }
@@ -915,13 +1000,13 @@ class TelegramQuoteBotService
         }
 
         $this->clearState($chatId);
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
-            "Te envío el PDF de {$quote->folio}.\n".
+            "Te envío el PDF de {$this->pdfDisplayName($quote)}.\n".
             $this->buildQuoteSummary($quote, true),
             $this->buildMainMenuKeyboard()
         );
-        $this->sendQuotePdf($chatId, $quote, 'PDF de '.$quote->folio);
+        $this->sendQuotePdf($chatId, $quote, 'PDF de '.$this->pdfDisplayName($quote));
 
         return true;
     }
@@ -946,7 +1031,7 @@ class TelegramQuoteBotService
         if ($quote === null) {
             $selection = $this->buildQuoteSelectionData((int) ($state['page'] ?? 1));
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "No encontré esa cotización. Intenta de nuevo con número, folio, id o número de proyecto.\n\n".
                 $selection['text'],
@@ -961,7 +1046,7 @@ class TelegramQuoteBotService
             'quote_id' => $quote->id,
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Seleccionaste {$quote->folio}.\n".
             $this->buildEditableDataSnapshot($quote)."\n\n".
@@ -992,7 +1077,7 @@ class TelegramQuoteBotService
         if ($quote === null) {
             $selection = $this->buildQuoteSelectionData((int) ($state['page'] ?? 1));
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "No encontré esa cotización. Intenta de nuevo con número, folio, id o número de proyecto.\n\n".
                 $selection['text'],
@@ -1003,13 +1088,13 @@ class TelegramQuoteBotService
         }
 
         $this->clearState($chatId);
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
-            "Te envío el PDF de {$quote->folio}.\n".
+            "Te envío el PDF de {$this->pdfDisplayName($quote)}.\n".
             $this->buildQuoteSummary($quote, true),
             $this->buildMainMenuKeyboard()
         );
-        $this->sendQuotePdf($chatId, $quote, 'PDF de '.$quote->folio);
+        $this->sendQuotePdf($chatId, $quote, 'PDF de '.$this->pdfDisplayName($quote));
 
         return true;
     }
@@ -1024,7 +1109,7 @@ class TelegramQuoteBotService
 
         if ($quote === null) {
             $this->clearState($chatId);
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'La cotización seleccionada ya no existe. Inicia de nuevo la operación.',
                 $this->buildMainMenuKeyboard()
@@ -1035,12 +1120,12 @@ class TelegramQuoteBotService
 
         if ($this->isFinishEditCommand($text)) {
             $this->clearState($chatId);
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'Edición finalizada. Te envío el PDF actualizado.',
                 $this->buildMainMenuKeyboard()
             );
-            $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$quote->folio);
+            $this->sendQuotePdf($chatId, $quote, 'PDF actualizado de '.$this->pdfDisplayName($quote));
 
             return true;
         }
@@ -1048,7 +1133,7 @@ class TelegramQuoteBotService
         $fieldSelection = $this->resolveEditableField($text);
 
         if ($fieldSelection === null) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'No reconozco ese campo.\n\n'.$this->buildEditableFieldsHelp(),
                 $this->buildEditFieldsKeyboard()
@@ -1068,7 +1153,7 @@ class TelegramQuoteBotService
             'label' => $label,
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Campo seleccionado: {$label}.\n".
             "Valor actual: {$currentValue}\n\n".
@@ -1093,7 +1178,7 @@ class TelegramQuoteBotService
 
         if ($quote === null) {
             $this->clearState($chatId);
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'La cotización seleccionada ya no existe. Inicia de nuevo la operación.',
                 $this->buildMainMenuKeyboard()
@@ -1115,7 +1200,7 @@ class TelegramQuoteBotService
                 'quote_id' => $quote->id,
             ]);
 
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 $this->buildEditableDataSnapshot($quote)."\n\n".$this->buildEditableFieldsHelp(),
                 $this->buildEditFieldsKeyboard()
@@ -1127,7 +1212,7 @@ class TelegramQuoteBotService
         try {
             $payload = $this->buildEditPayload($field, $newValue);
         } catch (RuntimeException $exception) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 $exception->getMessage(),
                 $this->buildEditValueKeyboard()
@@ -1144,7 +1229,7 @@ class TelegramQuoteBotService
             'quote_id' => $quote->id,
         ]);
 
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Campo actualizado: {$label}.\n".
             $this->buildEditableDataSnapshot($quote)."\n\n".
@@ -1163,6 +1248,11 @@ class TelegramQuoteBotService
         if (is_file($pdfPath)) {
             @unlink($pdfPath);
         }
+    }
+
+    private function pdfDisplayName(Quote $quote): string
+    {
+        return $quote->pdfFileBaseName();
     }
 
     private function buildQuoteSummary(Quote $quote, bool $includePayments): string
@@ -1710,6 +1800,86 @@ class TelegramQuoteBotService
         return $value > 0 ? (float) $value : null;
     }
 
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    private function sendMessage(string $chatId, string $text, ?array $replyMarkup = null): void
+    {
+        $this->telegramClient->sendMessageWithMarkup(
+            $chatId,
+            $text,
+            $this->toInlineKeyboardMarkup($replyMarkup)
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    private function toInlineKeyboardMarkup(?array $replyMarkup): ?array
+    {
+        if ($replyMarkup === null) {
+            return null;
+        }
+
+        $rows = $replyMarkup['keyboard'] ?? null;
+
+        if (!is_array($rows) || $rows === []) {
+            return null;
+        }
+
+        $inlineRows = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $inlineRow = [];
+
+            foreach ($row as $button) {
+                if (!is_array($button)) {
+                    continue;
+                }
+
+                $label = trim((string) ($button['text'] ?? ''));
+
+                if ($label !== '') {
+                    $inlineRow[] = [
+                        'text' => $label,
+                        'callback_data' => $this->buildCallbackData($label),
+                    ];
+                }
+            }
+
+            if ($inlineRow !== []) {
+                $inlineRows[] = $inlineRow;
+            }
+        }
+
+        if ($inlineRows === []) {
+            return null;
+        }
+
+        return [
+            'inline_keyboard' => $inlineRows,
+        ];
+    }
+
+    private function buildCallbackData(string $label): string
+    {
+        $trimmed = trim($label);
+
+        if ($trimmed === '') {
+            return 'menu';
+        }
+
+        if (strlen($trimmed) <= 64) {
+            return $trimmed;
+        }
+
+        return mb_strcut($trimmed, 0, 64, 'UTF-8');
+    }
+
     private function handleMainMenuOption(string $chatId, string $text, User $linkedUser): bool
     {
         $normalized = mb_strtolower(trim($text));
@@ -1775,9 +1945,9 @@ class TelegramQuoteBotService
 
     private function sendMainMenu(string $chatId, string $intro): void
     {
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
-            $intro."\n\nSelecciona una opción en el teclado.",
+            $intro."\n\nEscribe una opción del menú:",
             $this->buildMainMenuKeyboard()
         );
     }
@@ -1800,9 +1970,6 @@ class TelegramQuoteBotService
                 [
                     ['text' => '5 Editar cotización'],
                     ['text' => '6 Ayuda'],
-                ],
-                [
-                    ['text' => '0 Cancelar'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -1850,8 +2017,7 @@ class TelegramQuoteBotService
         }
 
         $rows[] = [
-            ['text' => 'Ayuda'],
-            ['text' => 'Cancelar'],
+            ['text' => '6 Ayuda'],
         ];
 
         return [
@@ -1902,7 +2068,6 @@ class TelegramQuoteBotService
         ];
         $rows[] = [
             ['text' => '6 Ayuda'],
-            ['text' => '0 Cancelar'],
         ];
 
         return [
@@ -1922,9 +2087,6 @@ class TelegramQuoteBotService
             'keyboard' => [
                 [
                     ['text' => '9 Ver formato'],
-                ],
-                [
-                    ['text' => '0 Cancelar'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -1958,7 +2120,6 @@ class TelegramQuoteBotService
                 ],
                 [
                     ['text' => '9 Finalizar edición'],
-                    ['text' => '0 Cancelar'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -1978,9 +2139,6 @@ class TelegramQuoteBotService
                     ['text' => 'vacio'],
                     ['text' => '9 Volver a campos'],
                 ],
-                [
-                    ['text' => '0 Cancelar'],
-                ],
             ],
             'resize_keyboard' => true,
             'one_time_keyboard' => false,
@@ -1994,11 +2152,7 @@ class TelegramQuoteBotService
     private function buildGuidedCancelKeyboard(): array
     {
         return [
-            'keyboard' => [
-                [
-                    ['text' => '0 Cancelar'],
-                ],
-            ],
+            'keyboard' => [],
             'resize_keyboard' => true,
             'one_time_keyboard' => false,
             'is_persistent' => true,
@@ -2014,9 +2168,6 @@ class TelegramQuoteBotService
             'keyboard' => [
                 [
                     ['text' => '1 Omitir'],
-                ],
-                [
-                    ['text' => '0 Cancelar'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -2037,9 +2188,6 @@ class TelegramQuoteBotService
                 ],
                 [
                     ['text' => '2 No, continuar'],
-                ],
-                [
-                    ['text' => '0 Cancelar'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -2078,9 +2226,6 @@ class TelegramQuoteBotService
                 [
                     ['text' => '10 Limpiar búsqueda'],
                 ],
-                [
-                    ['text' => '0 Cancelar'],
-                ],
             ],
             'resize_keyboard' => true,
             'one_time_keyboard' => false,
@@ -2105,7 +2250,7 @@ class TelegramQuoteBotService
         $code = $this->extractLinkCodeFromText($text);
 
         if ($code === null) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 "Debes enviar un código de vinculación válido.\n".
                 "Formato: /vincular CODIGO",
@@ -2118,7 +2263,7 @@ class TelegramQuoteBotService
         $linkedUser = $this->telegramUserLinkService->linkChatByCode($chatId, $code);
 
         if ($linkedUser === null) {
-            $this->telegramClient->sendMessageWithMarkup(
+            $this->sendMessage(
                 $chatId,
                 'El código no es válido o ya venció. Genera uno nuevo desde tu perfil en la aplicación.',
                 $this->buildGuidedCancelKeyboard()
@@ -2136,7 +2281,7 @@ class TelegramQuoteBotService
 
     private function sendLinkRequiredMessage(string $chatId): void
     {
-        $this->telegramClient->sendMessageWithMarkup(
+        $this->sendMessage(
             $chatId,
             "Este chat no está vinculado a una cuenta del sistema.\n".
             "1) Inicia sesión en la aplicación.\n".
@@ -2167,7 +2312,7 @@ class TelegramQuoteBotService
             ? 'Tu usuario ya no tiene permisos para continuar este flujo. Solicita acceso a un administrador.'
             : 'Tu usuario no tiene permisos para ejecutar esta acción. Solicita acceso a un administrador.';
 
-        $this->telegramClient->sendMessageWithMarkup($chatId, $message, $this->buildMainMenuKeyboard());
+        $this->sendMessage($chatId, $message, $this->buildMainMenuKeyboard());
 
         return false;
     }
@@ -2314,8 +2459,9 @@ class TelegramQuoteBotService
     private function helpMessage(): string
     {
         return "Bot de cotizaciones activo.\n".
-            "Usa los botones del menú o responde con el número de opción.\n\n".
-            "Tip: puedes escribir 0 para cancelar cualquier flujo.";
+            "Escribe el número de la opción que necesites.\n\n".
+            "Tip: puedes escribir cancelar en cualquier momento para detener el flujo actual.";
     }
 
 }
+

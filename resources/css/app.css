@@ -582,6 +582,11 @@
 		width: 100%;
 	}
 
+	.quote-table-action-form {
+		margin: 0;
+		width: 100%;
+	}
+
 	.quote-table-action-btn {
 		flex: 1 1 100%;
 		min-height: 2.1rem;
@@ -616,6 +621,30 @@
 		border-color: #94a3b8;
 	}
 
+	.quote-table-action-btn-pdf {
+		color: #1d4ed8;
+		background: #eff6ff;
+		border-color: #bfdbfe;
+	}
+
+	.quote-table-action-btn-pdf:hover {
+		color: #1e40af;
+		background: #dbeafe;
+		border-color: #93c5fd;
+	}
+
+	.quote-table-action-btn-delete {
+		color: #9f1239;
+		background: #fff1f2;
+		border-color: #fecdd3;
+	}
+
+	.quote-table-action-btn-delete:hover {
+		color: #881337;
+		background: #ffe4e6;
+		border-color: #fda4af;
+	}
+
 	@media (max-width: 640px) {
 		.quote-table-actions {
 			min-width: 8.2rem;
@@ -636,6 +665,10 @@
 			width: auto;
 			flex-wrap: nowrap;
 			gap: 0.4rem;
+		}
+
+		.quote-table-action-form {
+			width: auto;
 		}
 
 		.quote-table-action-btn {

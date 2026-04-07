@@ -53,7 +53,9 @@ class UserManagementController extends Controller
         ]);
 
         $this->ensurePermissionsExist();
-        $managedUser->syncPermissions($validated['permissions'] ?? []);
+        $managedUser->syncPermissions(
+            $this->sanitizeAssignablePermissions($validated['permissions'] ?? [])
+        );
 
         return Redirect::route('usuarios.index')->with('status', 'Usuario creado correctamente.');
     }
@@ -82,7 +84,9 @@ class UserManagementController extends Controller
 
         $user->update($payload);
         $this->ensurePermissionsExist();
-        $user->syncPermissions($validated['permissions'] ?? []);
+        $user->syncPermissions(
+            $this->sanitizeAssignablePermissions($validated['permissions'] ?? [])
+        );
 
         return Redirect::route('usuarios.index')->with('status', 'Usuario actualizado correctamente.');
     }
@@ -111,13 +115,20 @@ class UserManagementController extends Controller
      */
     private function permissionOptions(): array
     {
-        return [
+        $options = [
             AppPermissions::QUOTES_VIEW => 'Puede ver cotizaciones',
             AppPermissions::QUOTES_CREATE => 'Puede crear cotizaciones',
             AppPermissions::QUOTES_EDIT => 'Puede editar cotizaciones y anticipos',
+            AppPermissions::QUOTES_DELETE => 'Puede eliminar cotizaciones',
             AppPermissions::BRANDING_MANAGE => 'Puede gestionar identidad de marca',
             AppPermissions::USERS_MANAGE => 'Puede gestionar usuarios',
         ];
+
+        if (!$this->currentUserIsAdministrator()) {
+            unset($options[AppPermissions::QUOTES_DELETE]);
+        }
+
+        return $options;
     }
 
     /**
@@ -129,9 +140,31 @@ class UserManagementController extends Controller
             AppPermissions::QUOTES_VIEW => 'Ver cotizaciones',
             AppPermissions::QUOTES_CREATE => 'Crear cotizaciones',
             AppPermissions::QUOTES_EDIT => 'Editar cotizaciones',
+            AppPermissions::QUOTES_DELETE => 'Eliminar cotizaciones',
             AppPermissions::BRANDING_MANAGE => 'Gestionar marca',
             AppPermissions::USERS_MANAGE => 'Gestionar usuarios',
         ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $permissions
+     * @return array<int, string>
+     */
+    private function sanitizeAssignablePermissions(array $permissions): array
+    {
+        $normalizedPermissions = array_values(array_filter(
+            array_map(static fn (mixed $permission): string => (string) $permission, $permissions),
+            static fn (string $permission): bool => $permission !== ''
+        ));
+
+        if ($this->currentUserIsAdministrator()) {
+            return $normalizedPermissions;
+        }
+
+        return array_values(array_filter(
+            $normalizedPermissions,
+            static fn (string $permission): bool => $permission !== AppPermissions::QUOTES_DELETE
+        ));
     }
 
     private function ensurePermissionsExist(): void
@@ -139,5 +172,13 @@ class UserManagementController extends Controller
         foreach (AppPermissions::all() as $permissionName) {
             Permission::findOrCreate($permissionName, 'web');
         }
+    }
+
+    private function currentUserIsAdministrator(): bool
+    {
+        $authenticatedUser = Auth::user();
+
+        return $authenticatedUser instanceof User
+            && $authenticatedUser->hasRole('administrador');
     }
 }

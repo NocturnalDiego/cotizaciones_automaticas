@@ -46,6 +46,7 @@
 
         .company-info {
             text-align: right;
+            font-weight: 700;
             font-size: 13px;
             line-height: 1.55;
         }

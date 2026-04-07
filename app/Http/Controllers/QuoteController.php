@@ -114,7 +114,7 @@ class QuoteController extends Controller
             'logoPath' => $logoPath,
         ])->setPaper('letter');
 
-        return $pdf->download($quote->folio.'.pdf');
+        return $pdf->download($quote->pdfFileBaseName().'.pdf');
     }
 
     public function update(UpdateQuoteRequest $request, Quote $quote): RedirectResponse
@@ -154,6 +154,15 @@ class QuoteController extends Controller
         return redirect()
             ->route('cotizaciones.view', $quote)
             ->with('status', 'Cotización actualizada correctamente.');
+    }
+
+    public function destroy(Quote $quote): RedirectResponse
+    {
+        $quote->delete();
+
+        return redirect()
+            ->route('cotizaciones.index')
+            ->with('status', 'Cotización eliminada correctamente.');
     }
 
     /**

@@ -81,7 +81,7 @@ class QuoteAutomationService
             mkdir($outputDirectory, 0755, true);
         }
 
-        $filePath = $outputDirectory.DIRECTORY_SEPARATOR.$quote->folio.'.pdf';
+        $filePath = $outputDirectory.DIRECTORY_SEPARATOR.$this->telegramPdfFileBaseName($quote).'.pdf';
 
         Pdf::loadView('cotizaciones.pdf', [
             'quote' => $quote,
@@ -89,6 +89,16 @@ class QuoteAutomationService
         ])->setPaper('letter')->save($filePath);
 
         return $filePath;
+    }
+
+    private function telegramPdfFileBaseName(Quote $quote): string
+    {
+        $baseName = trim($quote->pdfFileBaseName());
+
+        $baseName = preg_replace('/[\\\\\/\:\*\?"\<\>\|]+/u', ' ', $baseName) ?? '';
+        $baseName = preg_replace('/\s+/u', ' ', trim($baseName)) ?? '';
+
+        return $baseName !== '' ? $baseName : $quote->folio;
     }
 
     /**

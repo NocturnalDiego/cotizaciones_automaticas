@@ -14,6 +14,8 @@ class AppPermissions
 
     public const QUOTES_EDIT = 'cotizaciones.editar';
 
+    public const QUOTES_DELETE = 'cotizaciones.eliminar';
+
     /**
      * @return array<int, string>
      */
@@ -25,6 +27,7 @@ class AppPermissions
             self::QUOTES_VIEW,
             self::QUOTES_CREATE,
             self::QUOTES_EDIT,
+            self::QUOTES_DELETE,
         ];
     }
 }

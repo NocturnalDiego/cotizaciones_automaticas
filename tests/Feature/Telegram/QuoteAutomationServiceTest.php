@@ -38,3 +38,28 @@ test('quote automation service can create quote from structured data', function 
     expect((float) $quote->balance_due)->toBe(122480.00);
     expect($quote->items()->count())->toBe(2);
 });
+
+test('quote automation service builds pdf with platform file naming convention', function () {
+    $service = app(QuoteAutomationService::class);
+
+    $quote = $service->createFromStructuredData([
+        'reference_code' => '4K700',
+        'client_name' => 'Cliente Telegram',
+        'issued_at' => '2026-04-06',
+        'items' => [
+            [
+                'description' => 'Concepto de prueba',
+                'quantity' => 1,
+                'unit_price' => 1000,
+            ],
+        ],
+    ]);
+
+    $pdfPath = $service->buildPdfForQuote($quote);
+
+    expect(basename($pdfPath))->toBe('Cliente Telegram - 4K700.pdf');
+
+    if (is_file($pdfPath)) {
+        @unlink($pdfPath);
+    }
+});
