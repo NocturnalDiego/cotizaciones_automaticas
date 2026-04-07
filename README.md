@@ -90,22 +90,6 @@ composer run dev
 
 ## Galería visual del proyecto
 
-Para que la presentación del repositorio se vea profesional, agrega capturas reales en `docs/img/` y muéstralas por flujo.
-
-### Capturas sugeridas
-
-- `dashboard-general.png`
-- `listado-cotizaciones.png`
-- `crear-cotizacion.png`
-- `detalle-cotizacion.png`
-- `pdf-generado.png`
-- `bot-telegram.png`
-
-### Plantilla de galería (lista para pegar en el README)
-
-```md
-## Galería visual
-
 | Panel principal | Listado de cotizaciones |
 |---|---|
 | ![Panel principal](docs/img/dashboard-general.png) | ![Listado de cotizaciones](docs/img/listado-cotizaciones.png) |
@@ -117,9 +101,6 @@ Para que la presentación del repositorio se vea profesional, agrega capturas re
 | PDF generado | Integración con Telegram |
 |---|---|
 | ![PDF generado](docs/img/pdf-generado.png) | ![Integración con Telegram](docs/img/bot-telegram.png) |
-```
-
-Guía de estilo recomendada para que las capturas se vean atractivas: [docs/presentacion-git.md](docs/presentacion-git.md).
 
 ## Telegram (bot)
 
