@@ -120,12 +120,16 @@ class UserManagementController extends Controller
             AppPermissions::QUOTES_CREATE => 'Puede crear cotizaciones',
             AppPermissions::QUOTES_EDIT => 'Puede editar cotizaciones y anticipos',
             AppPermissions::QUOTES_DELETE => 'Puede eliminar cotizaciones',
+            AppPermissions::CONTACTS_VIEW => 'Puede ver contactos',
+            AppPermissions::CONTACTS_EDIT => 'Puede crear y editar contactos',
+            AppPermissions::CONTACTS_DELETE => 'Puede eliminar contactos',
             AppPermissions::BRANDING_MANAGE => 'Puede gestionar identidad de marca',
             AppPermissions::USERS_MANAGE => 'Puede gestionar usuarios',
         ];
 
         if (!$this->currentUserIsAdministrator()) {
             unset($options[AppPermissions::QUOTES_DELETE]);
+            unset($options[AppPermissions::CONTACTS_DELETE]);
         }
 
         return $options;
@@ -141,6 +145,9 @@ class UserManagementController extends Controller
             AppPermissions::QUOTES_CREATE => 'Crear cotizaciones',
             AppPermissions::QUOTES_EDIT => 'Editar cotizaciones',
             AppPermissions::QUOTES_DELETE => 'Eliminar cotizaciones',
+            AppPermissions::CONTACTS_VIEW => 'Ver contactos',
+            AppPermissions::CONTACTS_EDIT => 'Editar contactos',
+            AppPermissions::CONTACTS_DELETE => 'Eliminar contactos',
             AppPermissions::BRANDING_MANAGE => 'Gestionar marca',
             AppPermissions::USERS_MANAGE => 'Gestionar usuarios',
         ];
@@ -163,7 +170,10 @@ class UserManagementController extends Controller
 
         return array_values(array_filter(
             $normalizedPermissions,
-            static fn (string $permission): bool => $permission !== AppPermissions::QUOTES_DELETE
+            static fn (string $permission): bool => !in_array($permission, [
+                AppPermissions::QUOTES_DELETE,
+                AppPermissions::CONTACTS_DELETE,
+            ], true)
         ));
     }
 

@@ -3,6 +3,7 @@
 namespace App\Services\Quotes;
 
 use App\Models\AppSetting;
+use App\Models\Contact;
 use App\Models\Quote;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
@@ -30,9 +31,10 @@ class QuoteAutomationService
         }
 
         $issuedAt = $this->resolveIssuedAt((string) ($quoteData['issued_at'] ?? ''));
+        $contactSnapshot = $this->resolveContactSnapshot($quoteData);
 
         /** @var Quote $quote */
-        $quote = DB::transaction(function () use ($quoteData, $items, $clientName, $issuedAt) {
+        $quote = DB::transaction(function () use ($quoteData, $items, $clientName, $issuedAt, $contactSnapshot) {
             $quote = Quote::create([
                 'folio' => 'TMP-'.Str::uuid(),
                 'reference_code' => $this->nullableString($quoteData['reference_code'] ?? null, 120),
@@ -43,9 +45,7 @@ class QuoteAutomationService
                 'currency' => 'MXN',
                 'vat_rate' => 0,
                 'terms' => $this->nullableString($quoteData['terms'] ?? null, 65535),
-                'contact_phone' => $this->nullableString($quoteData['contact_phone'] ?? null, 60),
-                'contact_email' => $this->nullableString($quoteData['contact_email'] ?? null, 255),
-                'contact_name' => $this->nullableString($quoteData['contact_name'] ?? null, 255),
+                ...$contactSnapshot,
             ]);
 
             $quote->update([
@@ -163,5 +163,76 @@ class QuoteAutomationService
         }
 
         return Str::limit($string, $maxLength, '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $quoteData
+     * @return array{contact_id:int|null,contact_name:string|null,contact_email:string|null,contact_phone:string|null}
+     */
+    private function resolveContactSnapshot(array $quoteData): array
+    {
+        $contact = $this->resolveContactModel($quoteData);
+
+        if ($contact !== null) {
+            return [
+                'contact_id' => $contact->id,
+                'contact_name' => $this->nullableString($contact->name, 255),
+                'contact_email' => $this->nullableString($contact->email, 255),
+                'contact_phone' => $this->nullableString($contact->phone, 60),
+            ];
+        }
+
+        return [
+            'contact_id' => null,
+            'contact_name' => $this->nullableString($quoteData['contact_name'] ?? null, 255),
+            'contact_email' => $this->nullableString($quoteData['contact_email'] ?? null, 255),
+            'contact_phone' => $this->nullableString($quoteData['contact_phone'] ?? null, 60),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $quoteData
+     */
+    private function resolveContactModel(array $quoteData): ?Contact
+    {
+        $contactId = (int) ($quoteData['contact_id'] ?? 0);
+
+        if ($contactId > 0) {
+            return Contact::query()->find($contactId);
+        }
+
+        $contactEmail = trim((string) ($quoteData['contact_email'] ?? ''));
+
+        if ($contactEmail !== '') {
+            $byEmail = Contact::query()
+                ->whereRaw('LOWER(email) = ?', [mb_strtolower($contactEmail)])
+                ->first();
+
+            if ($byEmail !== null) {
+                return $byEmail;
+            }
+        }
+
+        $contactPhone = trim((string) ($quoteData['contact_phone'] ?? ''));
+
+        if ($contactPhone !== '') {
+            $byPhone = Contact::query()
+                ->where('phone', $contactPhone)
+                ->first();
+
+            if ($byPhone !== null) {
+                return $byPhone;
+            }
+        }
+
+        $contactName = trim((string) ($quoteData['contact_name'] ?? ''));
+
+        if ($contactName === '') {
+            return null;
+        }
+
+        return Contact::query()
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($contactName)])
+            ->first();
     }
 }

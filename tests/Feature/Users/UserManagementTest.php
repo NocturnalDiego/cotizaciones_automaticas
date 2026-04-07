@@ -120,6 +120,7 @@ test('gestor sin rol administrador no puede asignar permiso para eliminar cotiza
             'permissions' => [
                 AppPermissions::QUOTES_VIEW,
                 AppPermissions::QUOTES_DELETE,
+                AppPermissions::CONTACTS_DELETE,
             ],
         ]);
 
@@ -130,4 +131,5 @@ test('gestor sin rol administrador no puede asignar permiso para eliminar cotiza
     expect($managedUser)->not->toBeNull();
     expect($managedUser?->can(AppPermissions::QUOTES_VIEW))->toBeTrue();
     expect($managedUser?->can(AppPermissions::QUOTES_DELETE))->toBeFalse();
+    expect($managedUser?->can(AppPermissions::CONTACTS_DELETE))->toBeFalse();
 });

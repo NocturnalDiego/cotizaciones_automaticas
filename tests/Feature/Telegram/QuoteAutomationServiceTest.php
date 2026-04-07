@@ -1,9 +1,16 @@
 <?php
 
+use App\Models\Contact;
 use App\Services\Quotes\QuoteAutomationService;
 
 test('quote automation service can create quote from structured data', function () {
     $service = app(QuoteAutomationService::class);
+
+    $contact = Contact::query()->create([
+        'name' => 'Contacto de Prueba',
+        'email' => 'contacto.pruebas@example.com',
+        'phone' => '5510000000',
+    ]);
 
     $quote = $service->createFromStructuredData([
         'reference_code' => '4K097',
@@ -12,9 +19,7 @@ test('quote automation service can create quote from structured data', function 
         'location' => 'Tecamac, Edo. Mexico',
         'issued_at' => '2026-03-28',
         'terms' => 'Estos costos se respetaran siempre y cuando se cuente con area libre y materiales disponibles.',
-        'contact_phone' => '5510000000',
-        'contact_email' => 'contacto.pruebas@example.com',
-        'contact_name' => 'Contacto de Prueba',
+        'contact_id' => $contact->id,
         'items' => [
             [
                 'description' => 'Configuracion de 1272 posiciones',
@@ -37,6 +42,10 @@ test('quote automation service can create quote from structured data', function 
     expect((float) $quote->total)->toBe(122480.00);
     expect((float) $quote->balance_due)->toBe(122480.00);
     expect($quote->items()->count())->toBe(2);
+    expect($quote->contact_id)->toBe($contact->id);
+    expect($quote->contact_name)->toBe('Contacto de Prueba');
+    expect($quote->contact_email)->toBe('contacto.pruebas@example.com');
+    expect($quote->contact_phone)->toBe('5510000000');
 });
 
 test('quote automation service builds pdf with platform file naming convention', function () {

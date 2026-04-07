@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Contact;
 use App\Models\Quote;
 use App\Models\User;
 use App\Support\AppPermissions;
@@ -19,6 +20,12 @@ test('authenticated user can create a quote and calculate totals', function () {
     $user = User::factory()->create();
     grantQuotePermissions($user, [AppPermissions::QUOTES_CREATE, AppPermissions::QUOTES_VIEW]);
 
+    $contact = Contact::query()->create([
+        'name' => 'Contacto de Prueba',
+        'email' => 'contacto.pruebas@example.com',
+        'phone' => '5510000000',
+    ]);
+
     $response = actingAs($user)
         ->post(route('cotizaciones.store'), [
             'reference_code' => '4K097',
@@ -27,9 +34,7 @@ test('authenticated user can create a quote and calculate totals', function () {
             'location' => 'Tecámac, Edo. México',
             'issued_at' => '2026-03-28',
             'terms' => 'Estos costos se respetarán siempre y cuando se cuente con área y materiales disponibles.',
-            'contact_phone' => '5510000000',
-            'contact_email' => 'contacto.pruebas@example.com',
-            'contact_name' => 'Contacto de Prueba',
+            'contact_id' => $contact->id,
             'item_description' => [
                 'Configuración de 1272 posiciones con crossbar pijado, eliminando un nivel.',
                 'Cortes de 74 protectores (retoque)',
@@ -52,6 +57,10 @@ test('authenticated user can create a quote and calculate totals', function () {
     expect((float) $quote->total)->toBe(122480.00);
     expect((float) $quote->balance_due)->toBe(122480.00);
     expect($quote->status)->toBe('emitida');
+    expect($quote->contact_id)->toBe($contact->id);
+    expect($quote->contact_name)->toBe('Contacto de Prueba');
+    expect($quote->contact_email)->toBe('contacto.pruebas@example.com');
+    expect($quote->contact_phone)->toBe('5510000000');
 });
 
 test('authenticated user can create a quote without client name', function () {

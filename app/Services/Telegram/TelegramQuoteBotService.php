@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Contact;
 use App\Models\Quote;
 use App\Models\User;
 use App\Services\Quotes\QuoteAutomationService;
@@ -19,6 +20,8 @@ class TelegramQuoteBotService
 
     private const LIST_PAGE_SIZE = 10;
 
+    private const CONTACT_SELECTION_PAGE_SIZE = 6;
+
     private const ACTION_CREATE_GUIDED = 'create_guided';
 
     private const ACTION_LIST_BROWSE = 'list_browse';
@@ -34,6 +37,8 @@ class TelegramQuoteBotService
     private const ACTION_EDIT_CHOOSE_FIELD = 'edit_choose_field';
 
     private const ACTION_EDIT_SET_VALUE = 'edit_set_value';
+
+    private const ACTION_EDIT_SELECT_CONTACT = 'edit_select_contact';
 
     private const ACTION_SEND_PDF_SELECT_QUOTE = 'send_pdf_select_quote';
 
@@ -257,7 +262,7 @@ class TelegramQuoteBotService
         $requiredPermission = match ($action) {
             self::ACTION_CREATE_GUIDED => AppPermissions::QUOTES_CREATE,
             self::ACTION_LIST_BROWSE, self::ACTION_LIST_SEARCH_INPUT, self::ACTION_SEND_PDF_SELECT_QUOTE => AppPermissions::QUOTES_VIEW,
-            self::ACTION_ADD_PAYMENT_SELECT_QUOTE, self::ACTION_ADD_PAYMENT_COLLECT_DATA, self::ACTION_EDIT_SELECT_QUOTE, self::ACTION_EDIT_CHOOSE_FIELD, self::ACTION_EDIT_SET_VALUE => AppPermissions::QUOTES_EDIT,
+            self::ACTION_ADD_PAYMENT_SELECT_QUOTE, self::ACTION_ADD_PAYMENT_COLLECT_DATA, self::ACTION_EDIT_SELECT_QUOTE, self::ACTION_EDIT_CHOOSE_FIELD, self::ACTION_EDIT_SET_VALUE, self::ACTION_EDIT_SELECT_CONTACT => AppPermissions::QUOTES_EDIT,
             default => null,
         };
 
@@ -276,6 +281,7 @@ class TelegramQuoteBotService
             self::ACTION_EDIT_SELECT_QUOTE => $this->handleEditSelectQuote($chatId, $text, $state),
             self::ACTION_EDIT_CHOOSE_FIELD => $this->handleEditChooseField($chatId, $text, $state),
             self::ACTION_EDIT_SET_VALUE => $this->handleEditSetValue($chatId, $text, $state),
+            self::ACTION_EDIT_SELECT_CONTACT => $this->handleEditSelectContact($chatId, $text, $state),
             self::ACTION_SEND_PDF_SELECT_QUOTE => $this->handleSendPdfSelectQuote($chatId, $text, $state),
             default => false,
         };
@@ -293,6 +299,7 @@ class TelegramQuoteBotService
             'location' => '',
             'issued_at' => now()->toDateString(),
             'terms' => '',
+            'contact_id' => null,
             'contact_name' => '',
             'contact_email' => '',
             'contact_phone' => '',
@@ -307,6 +314,7 @@ class TelegramQuoteBotService
                 'location' => trim((string) ($seedDraft['location'] ?? '')),
                 'issued_at' => trim((string) ($seedDraft['issued_at'] ?? '')) ?: now()->toDateString(),
                 'terms' => trim((string) ($seedDraft['terms'] ?? '')),
+                'contact_id' => (int) ($seedDraft['contact_id'] ?? 0) ?: null,
                 'contact_name' => trim((string) ($seedDraft['contact_name'] ?? '')),
                 'contact_email' => trim((string) ($seedDraft['contact_email'] ?? '')),
                 'contact_phone' => trim((string) ($seedDraft['contact_phone'] ?? '')),
@@ -332,7 +340,7 @@ class TelegramQuoteBotService
         $lines[] = 'Creación guiada de cotización.';
 
         if ($startStep === 'client_name') {
-            $lines[] = 'Paso 1 de 8: escribe el nombre del cliente.';
+            $lines[] = 'Paso 1 de 7: escribe el nombre del cliente.';
 
             $this->sendMessage(
                 $chatId,
@@ -344,7 +352,7 @@ class TelegramQuoteBotService
         }
 
         $lines[] = 'Detecté datos iniciales. Continuemos con el concepto principal.';
-        $lines[] = 'Paso 4 de 8: escribe la descripción del concepto.';
+        $lines[] = 'Paso 4 de 7: escribe la descripción del concepto.';
 
         $this->sendMessage(
             $chatId,
@@ -366,6 +374,7 @@ class TelegramQuoteBotService
             'location' => trim((string) ($quoteData['location'] ?? '')),
             'issued_at' => trim((string) ($quoteData['issued_at'] ?? '')),
             'terms' => trim((string) ($quoteData['terms'] ?? '')),
+            'contact_id' => (int) ($quoteData['contact_id'] ?? 0) ?: null,
             'contact_name' => trim((string) ($quoteData['contact_name'] ?? '')),
             'contact_email' => trim((string) ($quoteData['contact_email'] ?? '')),
             'contact_phone' => trim((string) ($quoteData['contact_phone'] ?? '')),
@@ -561,7 +570,7 @@ class TelegramQuoteBotService
 
             $draft['client_name'] = $trimmed;
             $this->setGuidedState($chatId, 'reference_code', $draft, $currentItem);
-            $this->sendMessage($chatId, 'Paso 2 de 8: escribe el número de proyecto o pedido. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Paso 2 de 7: escribe el número de proyecto o pedido. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -569,7 +578,7 @@ class TelegramQuoteBotService
         if ($step === 'reference_code') {
             $draft['reference_code'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'location', $draft, $currentItem);
-            $this->sendMessage($chatId, 'Paso 3 de 8: escribe la ubicación del proyecto. Puedes omitirla.', $this->buildGuidedOptionalKeyboard());
+            $this->sendMessage($chatId, 'Paso 3 de 7: escribe la ubicación del proyecto. Puedes omitirla.', $this->buildGuidedOptionalKeyboard());
 
             return true;
         }
@@ -577,7 +586,7 @@ class TelegramQuoteBotService
         if ($step === 'location') {
             $draft['location'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
             $this->setGuidedState($chatId, 'item_description', $draft, []);
-            $this->sendMessage($chatId, 'Paso 4 de 8: escribe la descripción del concepto.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 4 de 7: escribe la descripción del concepto.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
@@ -591,7 +600,7 @@ class TelegramQuoteBotService
 
             $currentItem['description'] = $trimmed;
             $this->setGuidedState($chatId, 'item_quantity', $draft, $currentItem);
-            $this->sendMessage($chatId, 'Paso 5 de 8: escribe la cantidad del concepto.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 5 de 7: escribe la cantidad del concepto.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
@@ -607,7 +616,7 @@ class TelegramQuoteBotService
 
             $currentItem['quantity'] = round($quantity, 2);
             $this->setGuidedState($chatId, 'item_unit_price', $draft, $currentItem);
-            $this->sendMessage($chatId, 'Paso 6 de 8: escribe el precio unitario.', $this->buildGuidedCancelKeyboard());
+            $this->sendMessage($chatId, 'Paso 6 de 7: escribe el precio unitario.', $this->buildGuidedCancelKeyboard());
 
             return true;
         }
@@ -643,8 +652,7 @@ class TelegramQuoteBotService
             }
 
             if ($this->isNegativeCommand($trimmed)) {
-                $this->setGuidedState($chatId, 'contact_name', $draft, []);
-                $this->sendMessage($chatId, 'Paso 7 de 8: escribe el nombre de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
+                $this->startGuidedContactSelection($chatId, $draft);
 
                 return true;
             }
@@ -654,49 +662,8 @@ class TelegramQuoteBotService
             return true;
         }
 
-        if ($step === 'contact_name') {
-            $draft['contact_name'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
-            $this->setGuidedState($chatId, 'contact_email', $draft, []);
-            $this->sendMessage($chatId, 'Paso 8 de 8: escribe el correo de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
-
-            return true;
-        }
-
-        if ($step === 'contact_email') {
-            if ($this->isSkipCommand($trimmed)) {
-                $draft['contact_email'] = '';
-            } else {
-                if (filter_var($trimmed, FILTER_VALIDATE_EMAIL) === false) {
-                    $this->sendMessage($chatId, 'Correo inválido. Captura un correo válido o escribe omitir.', $this->buildGuidedOptionalKeyboard());
-
-                    return true;
-                }
-
-                $draft['contact_email'] = $trimmed;
-            }
-
-            $this->setGuidedState($chatId, 'contact_phone', $draft, []);
-            $this->sendMessage($chatId, 'Escribe el teléfono de contacto. Puedes omitirlo.', $this->buildGuidedOptionalKeyboard());
-
-            return true;
-        }
-
-        if ($step === 'contact_phone') {
-            $draft['contact_phone'] = $this->isSkipCommand($trimmed) ? '' : $trimmed;
-            $this->setGuidedState($chatId, 'confirm', $draft, []);
-
-            $this->sendMessage(
-                $chatId,
-                "Resumen preliminar:\n".
-                "Cliente: ".($draft['client_name'] ?: 'Sin dato')."\n".
-                "Proyecto: ".($draft['reference_code'] ?: 'Sin referencia')."\n".
-                "Ubicación: ".($draft['location'] ?: 'Sin dato')."\n".
-                "Conceptos: ".count(is_array($draft['items'] ?? null) ? $draft['items'] : [])."\n\n".
-                "¿Deseas guardar la cotización?",
-                $this->buildGuidedConfirmKeyboard()
-            );
-
-            return true;
+        if ($step === 'contact_select') {
+            return $this->handleGuidedContactSelectionStep($chatId, $text, $state, $draft);
         }
 
         if ($step === 'confirm') {
@@ -737,6 +704,193 @@ class TelegramQuoteBotService
         }
 
         return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     * @param  array<string, mixed>  $draft
+     */
+    private function handleGuidedContactSelectionStep(string $chatId, string $text, array $state, array $draft): bool
+    {
+        $currentPage = max(1, (int) ($state['contact_page'] ?? 1));
+
+        if ($this->isPreviousPageCommand($text)) {
+            $this->startGuidedContactSelection($chatId, $draft, max(1, $currentPage - 1));
+
+            return true;
+        }
+
+        if ($this->isNextPageCommand($text)) {
+            $this->startGuidedContactSelection($chatId, $draft, $currentPage + 1);
+
+            return true;
+        }
+
+        $normalized = mb_strtolower(trim($text));
+
+        if ($this->isNoContactCommand($text) || in_array($normalized, ['omitir', 'saltar', 'skip'], true)) {
+            $draft['contact_id'] = null;
+            $draft['contact_name'] = '';
+            $draft['contact_email'] = '';
+            $draft['contact_phone'] = '';
+            $this->setGuidedState($chatId, 'confirm', $draft, []);
+            $this->sendMessage($chatId, $this->buildGuidedConfirmSummary($draft), $this->buildGuidedConfirmKeyboard());
+
+            return true;
+        }
+
+        $contact = $this->resolveContactFromInput($text, $state['contact_options'] ?? []);
+
+        if ($contact === null) {
+            $selection = $this->buildContactSelectionData($currentPage);
+
+            $this->sendMessage(
+                $chatId,
+                "No encontré ese contacto. Selecciona una opción de la lista.\n\n".$selection['text'],
+                $this->buildContactSelectionKeyboard($selection['options'], $selection['has_prev'], $selection['has_next'])
+            );
+
+            return true;
+        }
+
+        $draft['contact_id'] = $contact->id;
+        $draft['contact_name'] = $contact->name;
+        $draft['contact_email'] = $contact->email ?? '';
+        $draft['contact_phone'] = $contact->phone ?? '';
+        $this->setGuidedState($chatId, 'confirm', $draft, []);
+        $this->sendMessage($chatId, $this->buildGuidedConfirmSummary($draft), $this->buildGuidedConfirmKeyboard());
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $draft
+     */
+    private function startGuidedContactSelection(string $chatId, array $draft, int $page = 1): void
+    {
+        $selection = $this->buildContactSelectionData($page);
+
+        if ($selection['options'] === []) {
+            $draft['contact_id'] = null;
+            $draft['contact_name'] = '';
+            $draft['contact_email'] = '';
+            $draft['contact_phone'] = '';
+            $this->setGuidedState($chatId, 'confirm', $draft, []);
+
+            $this->sendMessage(
+                $chatId,
+                "No hay contactos registrados en el catálogo. Continuaremos sin contacto.\n\n".$this->buildGuidedConfirmSummary($draft),
+                $this->buildGuidedConfirmKeyboard()
+            );
+
+            return;
+        }
+
+        $this->setGuidedState($chatId, 'contact_select', $draft, [], [
+            'contact_options' => $selection['options'],
+            'contact_page' => $selection['page'],
+        ]);
+
+        $this->sendMessage(
+            $chatId,
+            "Paso 7 de 7: selecciona el contacto del catálogo.\n\n".$selection['text'],
+            $this->buildContactSelectionKeyboard($selection['options'], $selection['has_prev'], $selection['has_next'])
+        );
+    }
+
+    /**
+     * @return array{text:string,options:array<string,int>,page:int,last_page:int,has_prev:bool,has_next:bool}
+     */
+    private function buildContactSelectionData(int $page = 1, int $perPage = self::CONTACT_SELECTION_PAGE_SIZE): array
+    {
+        $query = Contact::query()->orderBy('name')->orderBy('id');
+        $total = (clone $query)->count();
+        $lastPage = max(1, (int) ceil($total / max(1, $perPage)));
+        $safePage = max(1, min($page, $lastPage));
+
+        $contacts = $query
+            ->forPage($safePage, $perPage)
+            ->get(['id', 'name', 'email', 'phone']);
+
+        if ($contacts->isEmpty()) {
+            return [
+                'text' => 'No hay contactos registrados todavía.',
+                'options' => [],
+                'page' => 1,
+                'last_page' => 1,
+                'has_prev' => false,
+                'has_next' => false,
+            ];
+        }
+
+        $lines = [
+            'Contactos disponibles (página '.$safePage.' de '.$lastPage.'): ',
+        ];
+
+        $options = [];
+
+        foreach ($contacts as $index => $contact) {
+            $position = (string) ($index + 1);
+            $options[$position] = (int) $contact->id;
+
+            $lines[] =
+                $position.') '.
+                $contact->name.
+                ' | Correo: '.($contact->email ?: 'Sin dato').
+                ' | Tel: '.($contact->phone ?: 'Sin dato');
+        }
+
+        return [
+            'text' => implode("\n", $lines),
+            'options' => $options,
+            'page' => $safePage,
+            'last_page' => $lastPage,
+            'has_prev' => $safePage > 1,
+            'has_next' => $safePage < $lastPage,
+        ];
+    }
+
+    /**
+     * @param  mixed  $optionsInput
+     */
+    private function resolveContactFromInput(string $input, mixed $optionsInput = []): ?Contact
+    {
+        $trimmed = trim($input);
+        $options = is_array($optionsInput) ? $optionsInput : [];
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (ctype_digit($trimmed) && isset($options[$trimmed])) {
+            return Contact::query()->find((int) $options[$trimmed]);
+        }
+
+        if (ctype_digit($trimmed)) {
+            $byId = Contact::query()->find((int) $trimmed);
+
+            if ($byId !== null) {
+                return $byId;
+            }
+        }
+
+        return Contact::query()
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($trimmed)])
+            ->first();
+    }
+
+    /**
+     * @param  array<string, mixed>  $draft
+     */
+    private function buildGuidedConfirmSummary(array $draft): string
+    {
+        return "Resumen preliminar:\n".
+            "Cliente: ".((string) ($draft['client_name'] ?? '') ?: 'Sin dato')."\n".
+            "Proyecto: ".((string) ($draft['reference_code'] ?? '') ?: 'Sin referencia')."\n".
+            "Ubicación: ".((string) ($draft['location'] ?? '') ?: 'Sin dato')."\n".
+            "Contacto: ".((string) ($draft['contact_name'] ?? '') ?: 'Sin contacto')."\n".
+            "Conceptos: ".count(is_array($draft['items'] ?? null) ? $draft['items'] : [])."\n\n".
+            "¿Deseas guardar la cotización?";
     }
 
     /**
@@ -805,14 +959,14 @@ class TelegramQuoteBotService
         return true;
     }
 
-    private function setGuidedState(string $chatId, string $step, array $draft, array $currentItem): void
+    private function setGuidedState(string $chatId, string $step, array $draft, array $currentItem, array $extraState = []): void
     {
-        $this->setState($chatId, [
+        $this->setState($chatId, array_merge([
             'action' => self::ACTION_CREATE_GUIDED,
             'step' => $step,
             'draft' => $draft,
             'current_item' => $currentItem,
-        ]);
+        ], $extraState));
     }
 
     /**
@@ -1144,6 +1298,13 @@ class TelegramQuoteBotService
 
         $fieldName = $fieldSelection['field'];
         $label = $fieldSelection['label'];
+
+        if ($fieldName === 'contact_id') {
+            $this->startEditContactSelection($chatId, $quote);
+
+            return true;
+        }
+
         $currentValue = $this->formatCurrentFieldValue($quote, $fieldName);
 
         $this->setState($chatId, [
@@ -1163,6 +1324,142 @@ class TelegramQuoteBotService
         );
 
         return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     */
+    private function handleEditSelectContact(string $chatId, string $text, array $state): bool
+    {
+        $quoteId = (int) ($state['quote_id'] ?? 0);
+        $quote = Quote::query()->find($quoteId);
+
+        if ($quote === null) {
+            $this->clearState($chatId);
+            $this->sendMessage(
+                $chatId,
+                'La cotización seleccionada ya no existe. Inicia de nuevo la operación.',
+                $this->buildMainMenuKeyboard()
+            );
+
+            return true;
+        }
+
+        $currentPage = max(1, (int) ($state['contact_page'] ?? 1));
+
+        if ($this->isPreviousPageCommand($text)) {
+            $this->startEditContactSelection($chatId, $quote, max(1, $currentPage - 1));
+
+            return true;
+        }
+
+        if ($this->isNextPageCommand($text)) {
+            $this->startEditContactSelection($chatId, $quote, $currentPage + 1);
+
+            return true;
+        }
+
+        $normalized = mb_strtolower(trim($text));
+
+        if ($this->isNoContactCommand($text) || in_array($normalized, ['omitir', 'saltar', 'skip'], true)) {
+            $quote->update([
+                'contact_id' => null,
+                'contact_name' => null,
+                'contact_email' => null,
+                'contact_phone' => null,
+            ]);
+            $quote->refresh();
+
+            $this->setState($chatId, [
+                'action' => self::ACTION_EDIT_CHOOSE_FIELD,
+                'quote_id' => $quote->id,
+            ]);
+
+            $this->sendMessage(
+                $chatId,
+                "Contacto actualizado: sin contacto.\n".
+                $this->buildEditableDataSnapshot($quote)."\n\n".
+                $this->buildEditableFieldsHelp(),
+                $this->buildEditFieldsKeyboard()
+            );
+
+            return true;
+        }
+
+        $contact = $this->resolveContactFromInput($text, $state['contact_options'] ?? []);
+
+        if ($contact === null) {
+            $selection = $this->buildContactSelectionData($currentPage);
+
+            $this->sendMessage(
+                $chatId,
+                "No encontré ese contacto. Selecciona una opción de la lista.\n\n".$selection['text'],
+                $this->buildContactSelectionKeyboard($selection['options'], $selection['has_prev'], $selection['has_next'])
+            );
+
+            return true;
+        }
+
+        $quote->update([
+            'contact_id' => $contact->id,
+            'contact_name' => $contact->name,
+            'contact_email' => $contact->email,
+            'contact_phone' => $contact->phone,
+        ]);
+        $quote->refresh();
+
+        $this->setState($chatId, [
+            'action' => self::ACTION_EDIT_CHOOSE_FIELD,
+            'quote_id' => $quote->id,
+        ]);
+
+        $this->sendMessage(
+            $chatId,
+            "Contacto actualizado: {$contact->name}.\n".
+            $this->buildEditableDataSnapshot($quote)."\n\n".
+            $this->buildEditableFieldsHelp(),
+            $this->buildEditFieldsKeyboard()
+        );
+
+        return true;
+    }
+
+    private function startEditContactSelection(string $chatId, Quote $quote, int $page = 1): void
+    {
+        $selection = $this->buildContactSelectionData($page);
+
+        if ($selection['options'] === []) {
+            $this->setState($chatId, [
+                'action' => self::ACTION_EDIT_CHOOSE_FIELD,
+                'quote_id' => $quote->id,
+            ]);
+
+            $this->sendMessage(
+                $chatId,
+                "No hay contactos registrados en el catálogo.\n\n".
+                $this->buildEditableDataSnapshot($quote)."\n\n".
+                $this->buildEditableFieldsHelp(),
+                $this->buildEditFieldsKeyboard()
+            );
+
+            return;
+        }
+
+        $this->setState($chatId, [
+            'action' => self::ACTION_EDIT_SELECT_CONTACT,
+            'quote_id' => $quote->id,
+            'contact_options' => $selection['options'],
+            'contact_page' => $selection['page'],
+        ]);
+
+        $this->sendMessage(
+            $chatId,
+            "Selecciona el contacto del catálogo para esta cotización.\n".
+            "Puedes responder con número o id del contacto.\n".
+            "Si deseas quitar el contacto, usa: 9 Sin contacto.\n\n".
+            $selection['text'],
+            $this->buildContactSelectionKeyboard($selection['options'], $selection['has_prev'], $selection['has_next'])
+        );
     }
 
     /**
@@ -1295,9 +1592,7 @@ class TelegramQuoteBotService
             '3) Ubicación: '.($quote->location ?: 'Sin dato'),
             '4) Fecha: '.$quote->issued_at->format('Y-m-d'),
             '5) Términos: '.($quote->terms ?: 'Sin dato'),
-            '6) Contacto (nombre): '.($quote->contact_name ?: 'Sin dato'),
-            '7) Contacto (correo): '.($quote->contact_email ?: 'Sin dato'),
-            '8) Contacto (teléfono): '.($quote->contact_phone ?: 'Sin dato'),
+            '6) Contacto del catálogo: '.($quote->contact_name ?: 'Sin dato'),
         ]);
     }
 
@@ -1336,15 +1631,7 @@ class TelegramQuoteBotService
         }
 
         if ($this->matchesMenuOption($normalized, 6)) {
-            return ['field' => 'contact_name', 'label' => 'Contacto (nombre)'];
-        }
-
-        if ($this->matchesMenuOption($normalized, 7)) {
-            return ['field' => 'contact_email', 'label' => 'Contacto (correo)'];
-        }
-
-        if ($this->matchesMenuOption($normalized, 8)) {
-            return ['field' => 'contact_phone', 'label' => 'Contacto (teléfono)'];
+            return ['field' => 'contact_id', 'label' => 'Contacto del catálogo'];
         }
 
         return match (true) {
@@ -1353,9 +1640,7 @@ class TelegramQuoteBotService
             in_array($normalized, ['3', 'ubicacion', 'ubicación'], true) => ['field' => 'location', 'label' => 'Ubicación'],
             in_array($normalized, ['4', 'fecha'], true) => ['field' => 'issued_at', 'label' => 'Fecha'],
             in_array($normalized, ['5', 'terminos', 'términos'], true) => ['field' => 'terms', 'label' => 'Términos'],
-            in_array($normalized, ['6', 'contacto', 'contacto nombre', 'nombre contacto'], true) => ['field' => 'contact_name', 'label' => 'Contacto (nombre)'],
-            in_array($normalized, ['7', 'correo', 'email', 'contacto correo'], true) => ['field' => 'contact_email', 'label' => 'Contacto (correo)'],
-            in_array($normalized, ['8', 'telefono', 'teléfono', 'contacto telefono', 'contacto teléfono'], true) => ['field' => 'contact_phone', 'label' => 'Contacto (teléfono)'],
+            in_array($normalized, ['6', 'contacto', 'contacto catalogo', 'contacto catálogo'], true) => ['field' => 'contact_id', 'label' => 'Contacto del catálogo'],
             default => null,
         };
     }
@@ -1383,6 +1668,10 @@ class TelegramQuoteBotService
             return [$field => date('Y-m-d', $timestamp)];
         }
 
+        if ($field === 'contact_id') {
+            throw new RuntimeException('Para editar el contacto usa el selector de catálogo.');
+        }
+
         if ($field === 'contact_email' && $newValue !== '' && filter_var($newValue, FILTER_VALIDATE_EMAIL) === false) {
             throw new RuntimeException('Correo inválido. Captura un email válido o escribe vacio.');
         }
@@ -1394,6 +1683,10 @@ class TelegramQuoteBotService
     {
         if ($field === 'issued_at') {
             return $quote->issued_at->format('Y-m-d');
+        }
+
+        if ($field === 'contact_id') {
+            return $quote->contact_name ?: 'Sin dato';
         }
 
         $value = $quote->{$field};
@@ -2029,6 +2322,56 @@ class TelegramQuoteBotService
     }
 
     /**
+     * @param  array<string, int>  $options
+     * @return array<string, mixed>
+     */
+    private function buildContactSelectionKeyboard(array $options, bool $hasPrev = false, bool $hasNext = false): array
+    {
+        $rows = [];
+        $buffer = [];
+
+        foreach (array_keys($options) as $optionNumber) {
+            $buffer[] = ['text' => $optionNumber];
+
+            if (count($buffer) === 3) {
+                $rows[] = $buffer;
+                $buffer = [];
+            }
+        }
+
+        if ($buffer !== []) {
+            $rows[] = $buffer;
+        }
+
+        if ($hasPrev || $hasNext) {
+            $navigationRow = [];
+
+            if ($hasPrev) {
+                $navigationRow[] = ['text' => '7 Anterior'];
+            }
+
+            if ($hasNext) {
+                $navigationRow[] = ['text' => '8 Siguiente'];
+            }
+
+            if ($navigationRow !== []) {
+                $rows[] = $navigationRow;
+            }
+        }
+
+        $rows[] = [
+            ['text' => '9 Sin contacto'],
+        ];
+
+        return [
+            'keyboard' => $rows,
+            'resize_keyboard' => true,
+            'one_time_keyboard' => false,
+            'is_persistent' => true,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function buildListActionsKeyboard(bool $hasPrev = false, bool $hasNext = false, bool $hasSearch = false): array
@@ -2112,14 +2455,10 @@ class TelegramQuoteBotService
                 ],
                 [
                     ['text' => '5 Términos'],
-                    ['text' => '6 Contacto nombre'],
+                    ['text' => '6 Contacto del catálogo'],
                 ],
                 [
-                    ['text' => '7 Contacto correo'],
-                    ['text' => '8 Contacto teléfono'],
-                ],
-                [
-                    ['text' => '9 Finalizar edición'],
+                    ['text' => '7 Finalizar edición'],
                 ],
             ],
             'resize_keyboard' => true,
@@ -2382,6 +2721,15 @@ class TelegramQuoteBotService
         return $this->matchesMenuOption($normalized, 2) || in_array($normalized, ['no', 'cancelar', 'cancel'], true);
     }
 
+    private function isNoContactCommand(string $text): bool
+    {
+        $normalized = mb_strtolower(trim($text));
+
+        return $this->matchesMenuOption($normalized, 9)
+            || str_contains($normalized, 'sin contacto')
+            || str_contains($normalized, 'quitar contacto');
+    }
+
     private function isAllowedChat(string $chatId): bool
     {
         $allowed = config('services.telegram.allowed_chat_ids', []);
@@ -2453,7 +2801,7 @@ class TelegramQuoteBotService
         $normalized = mb_strtolower(trim($text));
 
         return in_array($normalized, ['finalizar', 'terminar', 'listo', 'hecho'], true) ||
-            $this->matchesMenuOption($normalized, 9);
+            $this->matchesMenuOption($normalized, 7);
     }
 
     private function helpMessage(): string

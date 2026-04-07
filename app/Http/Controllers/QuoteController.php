@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreQuoteRequest;
 use App\Http\Requests\UpdateQuoteRequest;
 use App\Models\AppSetting;
+use App\Models\Contact;
 use App\Models\Quote;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
@@ -35,7 +36,10 @@ class QuoteController extends Controller
             'terms' => 'Estos costos se respetarán siempre y cuando se cuente con área libre y materiales disponibles.',
         ]);
 
-        return view('cotizaciones.create', compact('quote'));
+        return view('cotizaciones.create', [
+            'quote' => $quote,
+            'contacts' => $this->availableContacts(),
+        ]);
     }
 
     public function store(StoreQuoteRequest $request): RedirectResponse
@@ -47,6 +51,8 @@ class QuoteController extends Controller
         );
 
         $quote = DB::transaction(function () use ($request, $items) {
+            $contactSnapshot = $this->resolveContactSnapshot($request->integer('contact_id'));
+
             $quote = Quote::create([
                 'folio' => 'TMP-'.Str::uuid(),
                 'reference_code' => $request->string('reference_code')->toString(),
@@ -57,9 +63,7 @@ class QuoteController extends Controller
                 'currency' => 'MXN',
                 'vat_rate' => 0,
                 'terms' => $request->string('terms')->toString(),
-                'contact_phone' => $request->string('contact_phone')->toString(),
-                'contact_email' => $request->string('contact_email')->toString(),
-                'contact_name' => $request->string('contact_name')->toString(),
+                ...$contactSnapshot,
             ]);
 
             $quote->update([
@@ -97,7 +101,10 @@ class QuoteController extends Controller
     {
         $quote->load('items');
 
-        return view('cotizaciones.edit', compact('quote'));
+        return view('cotizaciones.edit', [
+            'quote' => $quote,
+            'contacts' => $this->availableContacts(),
+        ]);
     }
 
     public function pdf(Quote $quote): Response
@@ -126,6 +133,8 @@ class QuoteController extends Controller
         );
 
         DB::transaction(function () use ($request, $quote, $items) {
+            $contactSnapshot = $this->resolveContactSnapshot($request->integer('contact_id'));
+
             $quote->update([
                 'reference_code' => $request->string('reference_code')->toString(),
                 'client_name' => $request->string('client_name')->toString(),
@@ -134,9 +143,7 @@ class QuoteController extends Controller
                 'issued_at' => $request->date('issued_at'),
                 'vat_rate' => 0,
                 'terms' => $request->string('terms')->toString(),
-                'contact_phone' => $request->string('contact_phone')->toString(),
-                'contact_email' => $request->string('contact_email')->toString(),
-                'contact_name' => $request->string('contact_name')->toString(),
+                ...$contactSnapshot,
             ]);
 
             $quote->items()->delete();
@@ -206,5 +213,49 @@ class QuoteController extends Controller
         }
 
         return $items;
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Collection<int, Contact>
+     */
+    private function availableContacts()
+    {
+        return Contact::query()
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'email', 'phone']);
+    }
+
+    /**
+     * @return array{contact_id:int|null,contact_name:string|null,contact_email:string|null,contact_phone:string|null}
+     */
+    private function resolveContactSnapshot(?int $contactId): array
+    {
+        if (($contactId ?? 0) <= 0) {
+            return [
+                'contact_id' => null,
+                'contact_name' => null,
+                'contact_email' => null,
+                'contact_phone' => null,
+            ];
+        }
+
+        $contact = Contact::query()->find($contactId);
+
+        if ($contact === null) {
+            return [
+                'contact_id' => null,
+                'contact_name' => null,
+                'contact_email' => null,
+                'contact_phone' => null,
+            ];
+        }
+
+        return [
+            'contact_id' => $contact->id,
+            'contact_name' => trim((string) $contact->name) ?: null,
+            'contact_email' => trim((string) ($contact->email ?? '')) ?: null,
+            'contact_phone' => trim((string) ($contact->phone ?? '')) ?: null,
+        ];
     }
 }

@@ -23,6 +23,11 @@
                             {{ __('Cotizaciones') }}
                         </x-nav-link>
                     @endcan
+                    @can('contactos.ver')
+                        <x-nav-link :href="route('contactos.index')" :active="request()->routeIs('contactos.*')">
+                            {{ __('Contactos') }}
+                        </x-nav-link>
+                    @endcan
                     @can('marca.gestionar')
                         <x-nav-link :href="route('branding.edit')" :active="request()->routeIs('branding.*')">
                             {{ __('Marca') }}
@@ -94,6 +99,11 @@
             @can('cotizaciones.ver')
                 <x-responsive-nav-link :href="route('cotizaciones.index')" :active="request()->routeIs('cotizaciones.*')">
                     {{ __('Cotizaciones') }}
+                </x-responsive-nav-link>
+            @endcan
+            @can('contactos.ver')
+                <x-responsive-nav-link :href="route('contactos.index')" :active="request()->routeIs('contactos.*')">
+                    {{ __('Contactos') }}
                 </x-responsive-nav-link>
             @endcan
             @can('marca.gestionar')

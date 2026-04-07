@@ -16,6 +16,12 @@ class AppPermissions
 
     public const QUOTES_DELETE = 'cotizaciones.eliminar';
 
+    public const CONTACTS_VIEW = 'contactos.ver';
+
+    public const CONTACTS_EDIT = 'contactos.editar';
+
+    public const CONTACTS_DELETE = 'contactos.eliminar';
+
     /**
      * @return array<int, string>
      */
@@ -28,6 +34,9 @@ class AppPermissions
             self::QUOTES_CREATE,
             self::QUOTES_EDIT,
             self::QUOTES_DELETE,
+            self::CONTACTS_VIEW,
+            self::CONTACTS_EDIT,
+            self::CONTACTS_DELETE,
         ];
     }
 }

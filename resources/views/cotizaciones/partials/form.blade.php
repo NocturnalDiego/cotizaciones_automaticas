@@ -2,6 +2,8 @@
     $itemDescriptions = old('item_description', $quote->exists ? $quote->items->pluck('description')->all() : ['']);
     $itemQuantities = old('item_quantity', $quote->exists ? $quote->items->pluck('quantity')->all() : [1]);
     $itemUnitPrices = old('item_unit_price', $quote->exists ? $quote->items->pluck('unit_price')->all() : [0]);
+    $selectedContactId = (int) old('contact_id', $quote->contact_id ?? 0);
+    $selectedContact = collect($contacts ?? [])->firstWhere('id', $selectedContactId);
     $rowCount = max(1, count($itemDescriptions), count($itemQuantities), count($itemUnitPrices));
     $conceptRows = [];
 
@@ -153,21 +155,28 @@
 
     <div class="grid gap-4">
         <div>
-            <x-input-label for="contact_phone" value="Teléfono de contacto" />
-            <x-text-input id="contact_phone" name="contact_phone" type="text" class="mt-1 block w-full" :value="old('contact_phone', $quote->contact_phone)" />
-            <x-input-error :messages="$errors->get('contact_phone')" class="mt-2" />
+            <x-input-label for="contact_id" value="Contacto" />
+            <select
+                id="contact_id"
+                name="contact_id"
+                class="mt-1 block w-full rounded-lg border-slate-300 bg-white/90 text-slate-900 shadow-sm focus:border-sky-500 focus:ring-sky-500"
+            >
+                <option value="">Sin contacto asignado</option>
+                @foreach ($contacts as $contact)
+                    <option value="{{ $contact->id }}" @selected((int) $contact->id === $selectedContactId)>
+                        {{ $contact->name }}
+                    </option>
+                @endforeach
+            </select>
+            <x-input-error :messages="$errors->get('contact_id')" class="mt-2" />
         </div>
 
-        <div>
-            <x-input-label for="contact_email" value="Correo de contacto" />
-            <x-text-input id="contact_email" name="contact_email" type="email" class="mt-1 block w-full" :value="old('contact_email', $quote->contact_email)" />
-            <x-input-error :messages="$errors->get('contact_email')" class="mt-2" />
-        </div>
-
-        <div>
-            <x-input-label for="contact_name" value="Nombre de quien firma" />
-            <x-text-input id="contact_name" name="contact_name" type="text" class="mt-1 block w-full" :value="old('contact_name', $quote->contact_name)" />
-            <x-input-error :messages="$errors->get('contact_name')" class="mt-2" />
+        <div class="rounded-lg border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-700 space-y-1">
+            <p class="font-semibold text-slate-900">Datos del contacto seleccionado</p>
+            <p><span class="font-medium">Nombre:</span> {{ $selectedContact?->name ?? 'Sin dato' }}</p>
+            <p><span class="font-medium">Correo:</span> {{ $selectedContact?->email ?? 'Sin dato' }}</p>
+            <p><span class="font-medium">Teléfono:</span> {{ $selectedContact?->phone ?? 'Sin dato' }}</p>
+            <p class="text-xs text-slate-500">Los datos del contacto se guardarán en la cotización para conservar el histórico del PDF.</p>
         </div>
     </div>
 </div>

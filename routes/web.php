@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\BrandingSettingsController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\QuoteController;
 use App\Http\Controllers\QuotePaymentController;
@@ -66,6 +67,32 @@ Route::middleware('auth')->group(function () {
             Route::put('/{user}', [UserManagementController::class, 'update'])->name('update');
             Route::delete('/{user}', [UserManagementController::class, 'destroy'])->name('destroy');
             Route::delete('/{user}/telegram', [UserManagementController::class, 'revokeTelegram'])->name('telegram.revoke');
+        });
+
+    Route::prefix('/contactos')
+        ->name('contactos.')
+        ->group(function (): void {
+            Route::get('/', [ContactController::class, 'index'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_VIEW)
+                ->name('index');
+            Route::get('/create', [ContactController::class, 'create'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_EDIT)
+                ->name('create');
+            Route::post('/', [ContactController::class, 'store'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_EDIT)
+                ->name('store');
+            Route::get('/{contact}', [ContactController::class, 'view'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_VIEW)
+                ->name('view');
+            Route::get('/{contact}/edit', [ContactController::class, 'edit'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_EDIT)
+                ->name('edit');
+            Route::put('/{contact}', [ContactController::class, 'update'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_EDIT)
+                ->name('update');
+            Route::delete('/{contact}', [ContactController::class, 'destroy'])
+                ->middleware('permission:'.AppPermissions::CONTACTS_DELETE)
+                ->name('destroy');
         });
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

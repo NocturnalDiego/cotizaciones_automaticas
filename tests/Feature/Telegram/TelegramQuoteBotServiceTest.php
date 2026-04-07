@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Contact;
 use App\Models\Quote;
 use App\Models\User;
 use App\Services\Quotes\QuoteAutomationService;
@@ -220,7 +221,7 @@ test('telegram bot sends incomplete free text to guided flow with detected conte
     expect($telegramClient->messages)->toHaveCount(1);
     expect($telegramClient->messages[0])->toContain('Falta precio unitario para completar la cotización.');
     expect($telegramClient->messages[0])->toContain('Creación guiada de cotización.');
-    expect($telegramClient->messages[0])->toContain('Paso 4 de 8: escribe la descripción del concepto.');
+    expect($telegramClient->messages[0])->toContain('Paso 4 de 7: escribe la descripción del concepto.');
     expect($telegramClient->messagePayloads[0]['reply_markup'])->toBeNull();
 });
 
@@ -451,6 +452,60 @@ test('telegram bot can guide quote edit flow for client name', function () {
     expect((string) data_get($telegramClient->messagePayloads[2], 'reply_markup.inline_keyboard.0.0.text'))->toBe('vacio');
 });
 
+test('telegram bot can update quote contact from catalog in edit flow', function () {
+    $quote = Quote::create([
+        'folio' => 'COT-000031',
+        'reference_code' => '4K131',
+        'client_name' => 'Cliente Contacto',
+        'issued_at' => now()->toDateString(),
+        'vat_rate' => 0,
+    ]);
+
+    Contact::query()->create([
+        'name' => 'Contacto Catálogo',
+        'email' => 'catalogo@example.com',
+        'phone' => '5511998877',
+    ]);
+
+    [$service, $telegramClient] = botServiceFixture();
+    authorizeChatForBotTest(133);
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 133],
+            'text' => 'editar factura',
+        ],
+    ]);
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 133],
+            'text' => $quote->folio,
+        ],
+    ]);
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 133],
+            'text' => '6',
+        ],
+    ]);
+
+    $service->processUpdate([
+        'message' => [
+            'chat' => ['id' => 133],
+            'text' => '1',
+        ],
+    ]);
+
+    $quote->refresh();
+
+    expect($quote->contact_name)->toBe('Contacto Catálogo');
+    expect($quote->contact_email)->toBe('catalogo@example.com');
+    expect($quote->contact_phone)->toBe('5511998877');
+    expect(collect($telegramClient->messages)->last())->toContain('Contacto actualizado: Contacto Catálogo.');
+});
+
 test('telegram bot can guide resend pdf flow from listed quotes', function () {
     $quote = Quote::create([
         'folio' => 'COT-000004',
@@ -496,6 +551,12 @@ test('telegram bot can create quote in guided mode', function () {
         'total' => 1000,
     ]);
 
+    Contact::query()->create([
+        'name' => 'Contacto de Prueba',
+        'email' => 'oscar@example.com',
+        'phone' => '5511223344',
+    ]);
+
     [$service, $telegramClient] = botServiceFixture();
     authorizeChatForBotTest(108);
 
@@ -513,9 +574,7 @@ test('telegram bot can create quote in guided mode', function () {
     $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '2']]);
     $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '1500']]);
     $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '2 No, continuar']]);
-    $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => 'Contacto de Prueba']]);
-    $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => 'oscar@example.com']]);
-    $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '5511223344']]);
+    $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '1']]);
     $service->processUpdate(['message' => ['chat' => ['id' => 108], 'text' => '1 Confirmar cotización']]);
 
     expect(collect($telegramClient->messages)->last())->toContain('Cotización creada correctamente.');
